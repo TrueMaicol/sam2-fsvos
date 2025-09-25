@@ -58,13 +58,13 @@ def get_arguments():
     return parser.parse_args()
 
 
-def process_video_sam2(data, video_predictor, evaluator, support_set, device, base_dir="./offline_test_data"):
+def process_video_sam2(data, video_predictor, evaluator, support_set, device, data_dir="./output"):
     video_query_img, video_query_mask, _, _, idx, dir_name, _ = data
 
     print(f"Starting the segmentation of test {dir_name} with class {idx}")
 
-    frames_dir = f"{base_dir}/frames/{dir_name}"
-    output_dir = f"{base_dir}/output/{dir_name}"
+    frames_dir = f"{data_dir}/frames/{dir_name}"
+    output_dir = f"{data_dir}/output/{dir_name}"
     # support_overlay_dir = f"{base_dir}/support_overlay/{dir_name}"
     create_frames_dir(frames_dir, video_query_img, support_set)
     # Create output directory if it doesn't exist
@@ -78,7 +78,7 @@ def process_video_sam2(data, video_predictor, evaluator, support_set, device, ba
     obj_id = 1  # Use same object ID for all support frames and query frames
 
     # Create support masks directory
-    support_overlay_dir = f"{base_dir}/support_overlay/{dir_name}"
+    support_overlay_dir = f"{data_dir}/support_overlay/{dir_name}"
     os.makedirs(support_overlay_dir, exist_ok=True)
 
     # Add support frame masks to the predictor
@@ -140,7 +140,7 @@ def test(args):
     video_predictor = build_sam2_video_predictor(model_cfg, checkpoint, device=device)
     print("Successfully loaded SAM2 model")
     
-    base_dir = f"./offline_test_data/{args.session_name}"
+    base_dir = f"./output/{args.session_name}"
     os.makedirs(base_dir)
     test_dataset = YTVOSDataset(train=False, set_index=args.group, data_dir=args.dataset_path, test_query_frame_num=args.test_query_frame_num)
     test_list = test_dataset.get_class_list()
