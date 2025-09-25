@@ -155,7 +155,7 @@ def test(args):
             support_set = [(img, mask) for img, mask in zip(new_support_img, new_support_mask)]
             print(f"Support set for class {idx} initialized with {len(support_set)} images.")
 
-        process_video_sam2(data, video_predictor, test_evaluations, support_set, device, base_dir=base_dir)
+        process_video_sam2(data, video_predictor, test_evaluations, support_set, device, data_dir=base_dir)
         
         print(f"F-score list: {test_evaluations.f_score}")
         print(f"J-score list: {test_evaluations.j_score}")
