@@ -53,7 +53,7 @@ def get_arguments():
     parser.add_argument("--session_name", type=str, default=str(random.randbytes(4).hex()))
     parser.add_argument("--verbose", default=False)
     parser.add_argument("--group", type=int, default=1)
-    parser.add_argument("--dataset_path", type=str, default="./datasets/YoutubeVIS-2019")
+    parser.add_argument("--dataset_path", type=str, default=None)
     parser.add_argument("--test_query_frame_num", type=int, default=None)
     return parser.parse_args()
 
