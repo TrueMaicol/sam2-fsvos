@@ -17,16 +17,22 @@ def save_mask_overlay(image, mask, output_path):
     if isinstance(image, Image.Image):
         image = np.array(image)
     
+    print(f"Image shape: {image.shape[:2]}, Mask shape: {mask.shape[:2]}")
+    
+    # Ensure mask is 2D boolean array
+    mask = mask.squeeze()  # Remove any extra dimensions
+    if mask.ndim > 2:
+        mask = mask[:, :, 0] if mask.shape[2] == 1 else mask.max(axis=2)
+    
     if mask.shape[:2] != image.shape[:2]:
         # print(f"Warning: Mask shape {mask.shape} doesn't match image shape {image.shape}")
-        # Reshape or resize mask if needed
-        mask = mask.squeeze()  # Remove any extra dimensions
-        if mask.shape[:2] != image.shape[:2]:
-            mask = cv2.resize(mask.astype(np.uint8), (image.shape[1], image.shape[0]), interpolation=cv2.INTER_NEAREST).astype(bool)
-
+        mask = cv2.resize(mask.astype(np.uint8), (image.shape[1], image.shape[0]), interpolation=cv2.INTER_NEAREST).astype(bool)
+    
+    # Ensure mask is boolean
+    mask = mask.astype(bool)
+    
     # Create colored mask overlay
     colored_mask = np.zeros_like(image, dtype=np.uint8)
-    print(mask.shape, colored_mask[mask].shape)
     colored_mask[mask] = [0, 255, 0]  # Green overlay
     
     # Blend with original image
@@ -59,10 +65,14 @@ def get_arguments():
     return parser.parse_args()
 
 
+
 def process_video_sam2(data, video_predictor, evaluator, support_set, device, data_dir="./output"):
     video_query_img, video_query_mask, _, _, idx, dir_name, _ = data
 
-    print(f"Starting the segmentation of test {dir_name} with class {idx}")
+    # print(f"Length of query gt: {len(video_query_mask)}")
+    # print(f"Shape of gt mask: {video_query_mask[0].shape}")
+    # print(f"MASK {np.sum(video_query_mask[0])} non-zero elements")
+    # print(f"Starting the segmentation of test {dir_name} with class {idx}")
 
     frames_dir = f"{data_dir}/frames/{dir_name}"
     output_dir = f"{data_dir}/output/{dir_name}"
@@ -120,7 +130,8 @@ def process_video_sam2(data, video_predictor, evaluator, support_set, device, da
             segmented_masks.append(mask)
             # Save visualization
             save_mask_overlay(query_frame, mask, f"{output_dir}/frame_{i:04d}.png")
-            save_mask_overlay(query_frame, video_query_mask[query_frame_idx], f"{output_dir}/frame_{i:04d}_gt.png")
+            print("overlay of the ground truth")
+            save_mask_overlay(query_frame, video_query_mask[i], f"{output_dir}/frame_{i:04d}_gt.png")
             print(f"Successfully processed query frame {i}")
         else:
             # No mask found, append empty mask
@@ -145,7 +156,7 @@ def test(args):
     output_directory = args.output_dir
     if output_directory is None:
         output_directory = f"./output/{args.session_name}"
-    os.makedirs(output_directory)
+    os.makedirs(output_directory, exist_ok=True)
 
     test_dataset = YTVOSDataset(train=False, set_index=args.group, data_dir=args.dataset_path, test_query_frame_num=args.test_query_frame_num)
     test_list = test_dataset.get_class_list()
