@@ -55,6 +55,7 @@ def get_arguments():
     parser.add_argument("--group", type=int, default=1)
     parser.add_argument("--dataset_path", type=str, default=None)
     parser.add_argument("--test_query_frame_num", type=int, default=None)
+    parser.add_argument("--output_dir", type=str, default="./output")
     return parser.parse_args()
 
 
@@ -119,6 +120,7 @@ def process_video_sam2(data, video_predictor, evaluator, support_set, device, da
             segmented_masks.append(mask)
             # Save visualization
             save_mask_overlay(query_frame, mask, f"{output_dir}/frame_{i:04d}.png")
+            save_mask_overlay(query_frame, video_query_mask[query_frame_idx], f"{output_dir}/frame_{i:04d}_gt.png")
             print(f"Successfully processed query frame {i}")
         else:
             # No mask found, append empty mask
@@ -140,8 +142,11 @@ def test(args):
     video_predictor = build_sam2_video_predictor(model_cfg, checkpoint, device=device)
     print("Successfully loaded SAM2 model")
     
-    base_dir = f"./output/{args.session_name}"
-    os.makedirs(base_dir)
+    output_directory = args.output_dir
+    if output_directory is None:
+        output_directory = f"./output/{args.session_name}"
+    os.makedirs(output_directory)
+
     test_dataset = YTVOSDataset(train=False, set_index=args.group, data_dir=args.dataset_path, test_query_frame_num=args.test_query_frame_num)
     test_list = test_dataset.get_class_list()
 
@@ -155,7 +160,7 @@ def test(args):
             support_set = [(img, mask) for img, mask in zip(new_support_img, new_support_mask)]
             print(f"Support set for class {idx} initialized with {len(support_set)} images.")
 
-        process_video_sam2(data, video_predictor, test_evaluations, support_set, device, data_dir=base_dir)
+        process_video_sam2(data, video_predictor, test_evaluations, support_set, device, data_dir=output_directory)
         
         print(f"F-score list: {test_evaluations.f_score}")
         print(f"J-score list: {test_evaluations.j_score}")
