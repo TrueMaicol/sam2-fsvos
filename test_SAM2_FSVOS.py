@@ -53,7 +53,8 @@ def get_arguments():
     parser.add_argument("--session_name", type=str, default=str(random.randbytes(4).hex()))
     parser.add_argument("--verbose", default=False)
     parser.add_argument("--group", type=int, default=1)
-
+    parser.add_argument("--dataset_path", type=str, default="./datasets/YoutubeVIS-2019")
+    parser.add_argument("--test_query_frame_num", type=int, default=None)
     return parser.parse_args()
 
 
@@ -141,10 +142,10 @@ def test(args):
     
     base_dir = f"./offline_test_data/{args.session_name}"
     os.makedirs(base_dir)
-    test_dataset = YTVOSDataset(train=False, set_index=args.group)
+    test_dataset = YTVOSDataset(train=False, set_index=args.group, data_dir=args.dataset_path, test_query_frame_num=args.test_query_frame_num)
     test_list = test_dataset.get_class_list()
 
-    print('test_group:',args.group, '  test_num:', len(test_dataset), '  class_list:', test_list)
+    print('test_group:',args.group, '  test_num:', len(test_dataset), '  class_list:', test_list, ' dataset_path:', args.dataset_path)
 
     test_evaluations = Evaluator(class_list=test_list, verbose=args.verbose)
     support_set = []

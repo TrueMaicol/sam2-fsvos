@@ -7,10 +7,10 @@ from PIL import Image
 
 
 class YTVOSDataset(Dataset):
-    def __init__(self, data_path=None, train=True, valid=False,
+    def __init__(self, data_dir=None, train=True, valid=False,
                  set_index=1, finetune_idx=None,
                  support_frame=5, query_frame=1, sample_per_class=10,
-                 transforms=None, another_transform=None):
+                 transforms=None, another_transform=None, test_query_frame_num=None):
         self.train = train
         self.valid = valid
         self.set_index = set_index
@@ -19,14 +19,15 @@ class YTVOSDataset(Dataset):
         self.sample_per_class = sample_per_class
         self.transforms = transforms
         self.another_transform = another_transform
+        self.test_query_frame_num = test_query_frame_num
 
-        data_dir = "./datasets/YoutubeVIS-2019"
+        if data_dir is None:
+            data_dir = "./datasets/YoutubeVIS-2019"
         self.img_dir = os.path.join(data_dir, 'valid', 'JPEGImages')
         self.ann_file = os.path.join(data_dir, 'valid', 'instances_val_sub.json')
 
         self.load_annotations()
 
-        print('data set index: ', set_index)
         self.train_list = [n + 1 for n in range(40) if n % 4 != (set_index - 1)]
         self.valid_list = [n + 1 for n in range(40) if n % 4 == (set_index - 1)]
 
@@ -89,6 +90,9 @@ class YTVOSDataset(Dataset):
         choice_frame = random.sample(frame_list, 1)
         if test:
             frame_num = frame_len
+            # override the number of query frames during testing
+            if self.test_query_frame_num is not None:
+                frame_num = self.test_query_frame_num
         if frame_num > 1:
             # if the requested number of frames is less than the available frames for this class
             if frame_num <= frame_len:
@@ -165,7 +169,7 @@ class YTVOSDataset(Dataset):
                 begin_new = True
         list_id = self.test_video_classes[idx]
         vid_set = self.video_ids[list_id]
-        print(f"Testing class {self.class_list[list_id]} with {len(vid_set)} videos")
+        # print(f"Testing class {self.class_list[list_id]} with {len(vid_set)} videos")
         support_frames, support_masks = [], []
         if begin_new:
             support_vid = random.sample(vid_set, self.support_frame)
@@ -212,4 +216,3 @@ class YTVOSDataset(Dataset):
 if __name__ == "__main__":
     ytvos = YTVOSDataset(train=True, query_frame=5, support_frame=5)
     video_query_img, video_query_mask, new_support_img, new_support_mask, idx, *_ = ytvos[0]
-    print(ytvos.vid_infos[1])
