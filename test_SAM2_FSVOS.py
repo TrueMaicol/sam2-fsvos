@@ -17,7 +17,7 @@ def save_mask_overlay(image, mask, output_path):
     if isinstance(image, Image.Image):
         image = np.array(image)
     
-    print(f"Image shape: {image.shape[:2]}, Mask shape: {mask.shape[:2]}")
+    # print(f"Image shape: {image.shape[:2]}, Mask shape: {mask.shape[:2]}")
     
     # Ensure mask is 2D boolean array
     mask = mask.squeeze()  # Remove any extra dimensions
@@ -130,7 +130,7 @@ def process_video_sam2(data, video_predictor, evaluator, support_set, device, da
             segmented_masks.append(mask)
             # Save visualization
             save_mask_overlay(query_frame, mask, f"{output_dir}/frame_{i:04d}.png")
-            print("overlay of the ground truth")
+            # print("overlay of the ground truth")
             save_mask_overlay(query_frame, video_query_mask[i], f"{output_dir}/frame_{i:04d}_gt.png")
             print(f"Successfully processed query frame {i}")
         else:
