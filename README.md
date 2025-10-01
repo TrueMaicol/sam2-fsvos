@@ -1,6 +1,6 @@
 # SAM2-FSVOS: Few-Shot Video Object Segmentation with SAM 2
 
-This repository implements **Few-Shot Video Object Segmentation (FSVOS)** using the **SAM 2 (Segment Anything Model 2)** foundation model, evaluated on the **YouTube-VIS 2019** benchmark following the methodology established by the **DANet** model.
+This repository implements **Few-Shot Video Object Segmentation (FSVOS)** using the **SAM 2 (Segment Anything Model 2)** foundation model, evaluated on the **YouTube-VIS 2019 VAL** benchmark following the methodology established by the **DANet** model.
 
 ## Overview
 

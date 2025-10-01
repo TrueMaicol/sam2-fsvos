@@ -46,22 +46,36 @@ def save_image(image, path):
         image = Image.fromarray(image)
     image.save(path)
 
-def create_frames_dir(dir_path, video_query_img, support_set):
-    os.makedirs(os.path.join(dir_path), exist_ok=True)
+def create_dirs(base_dir, video_query_img, video_query_mask, support_set):
+    
+    frames_dir = os.path.join(base_dir, "frames")
+    output_dir = os.path.join(base_dir, "output")
+    ground_truth_dir = os.path.join(base_dir, "ground_truth")
+    
+    os.makedirs(frames_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(ground_truth_dir, exist_ok=True)
+
     for i, (img, _) in enumerate(support_set):
-        save_image(img, os.path.join(dir_path, f"{i:04d}.jpg"))
+        save_image(img, os.path.join(frames_dir, f"{i:04d}.jpg"))
 
     for i, img in enumerate(video_query_img):
-        save_image(img, os.path.join(dir_path, f"{i + len(support_set):04d}.jpg"))
+        save_image(img, os.path.join(frames_dir, f"{i + len(support_set):04d}.jpg"))
+
+    return frames_dir, output_dir, ground_truth_dir
+
+    
 
 def get_arguments():
     parser = argparse.ArgumentParser(description='FSVOS')
+    parser.add_argument("--checkpoint", type=str, default=None)
+    parser.add_argument("--config", type=str, default=None)
     parser.add_argument("--session_name", type=str, default=str(random.randbytes(4).hex()))
-    parser.add_argument("--verbose", default=False)
-    parser.add_argument("--group", type=int, default=1)
     parser.add_argument("--dataset_path", type=str, default=None)
-    parser.add_argument("--test_query_frame_num", type=int, default=None)
     parser.add_argument("--output_dir", type=str, default="./output")
+    parser.add_argument("--group", type=int, default=1)
+    parser.add_argument("--test_query_frame_num", type=int, default=None)
+    parser.add_argument("--verbose", default=False)
     return parser.parse_args()
 
 
@@ -73,13 +87,10 @@ def process_video_sam2(data, video_predictor, evaluator, support_set, device, da
     # print(f"Shape of gt mask: {video_query_mask[0].shape}")
     # print(f"MASK {np.sum(video_query_mask[0])} non-zero elements")
     # print(f"Starting the segmentation of test {dir_name} with class {idx}")
+    
+    base_dir = f"{data_dir}/{dir_name}"
 
-    frames_dir = f"{data_dir}/frames/{dir_name}"
-    output_dir = f"{data_dir}/output/{dir_name}"
-    # support_overlay_dir = f"{base_dir}/support_overlay/{dir_name}"
-    create_frames_dir(frames_dir, video_query_img, support_set)
-    # Create output directory if it doesn't exist
-    os.makedirs(output_dir, exist_ok=True)
+    frames_dir, output_dir, ground_truth_dir = create_dirs(base_dir, video_query_img, video_query_mask, support_set)
     
     # Initialize inference state with all frames directory
     inference_state = video_predictor.init_state(video_path=frames_dir)
@@ -87,10 +98,6 @@ def process_video_sam2(data, video_predictor, evaluator, support_set, device, da
     print("Loading support frames and their masks into SAM2")
     
     obj_id = 1  # Use same object ID for all support frames and query frames
-
-    # Create support masks directory
-    support_overlay_dir = f"{data_dir}/support_overlay/{dir_name}"
-    os.makedirs(support_overlay_dir, exist_ok=True)
 
     # Add support frame masks to the predictor
     for i, (img, mask) in enumerate(support_set):
@@ -103,7 +110,7 @@ def process_video_sam2(data, video_predictor, evaluator, support_set, device, da
             obj_id=obj_id,
             mask=mask_tensor
         )
-        save_mask_overlay(img, mask_binary > 0, os.path.join(support_overlay_dir, f"overlay_{i:04d}.png"))
+        save_mask_overlay(img, mask_binary > 0, os.path.join(ground_truth_dir, f"support_{i:04d}.png"))
         print(f"Added support frame {i}")
 
     print("Processing query video...")
@@ -129,9 +136,9 @@ def process_video_sam2(data, video_predictor, evaluator, support_set, device, da
             mask = video_segments[query_frame_idx][obj_id]
             segmented_masks.append(mask)
             # Save visualization
-            save_mask_overlay(query_frame, mask, f"{output_dir}/frame_{i:04d}.png")
+            save_mask_overlay(query_frame, mask, f"{output_dir}/out_{i:04d}.png")
             # print("overlay of the ground truth")
-            save_mask_overlay(query_frame, video_query_mask[i], f"{output_dir}/frame_{i:04d}_gt.png")
+            save_mask_overlay(query_frame, video_query_mask[i], f"{ground_truth_dir}/gt_{i:04d}.png")
             print(f"Successfully processed query frame {i}")
         else:
             # No mask found, append empty mask
@@ -147,13 +154,22 @@ def process_video_sam2(data, video_predictor, evaluator, support_set, device, da
 
 def test(args):
 
-    checkpoint = "./checkpoints/sam2.1_hiera_tiny.pt"
-    model_cfg = "configs/sam2.1/sam2.1_hiera_t.yaml"
+    checkpoint = f"./checkpoints/{args.checkpoint}"
+    model_cfg = f"./configs/{args.config}"
+    
+    if checkpoint is None:
+        print("No checkpoint path provided. Exiting")
+        
+    if model_cfg is None:
+        print("No config path provided. Exiting")
+
+    # checkpoint = "./checkpoints/sam2.1_hiera_tiny.pt"
+    # model_cfg = "configs/sam2.1/sam2.1_hiera_t.yaml"
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     video_predictor = build_sam2_video_predictor(model_cfg, checkpoint, device=device)
     print("Successfully loaded SAM2 model")
     
-    output_directory = args.output_dir
+    output_directory = f"{args.output_dir}/{args.session_name}"
     if output_directory is None:
         output_directory = f"./output/{args.session_name}"
     os.makedirs(output_directory, exist_ok=True)
