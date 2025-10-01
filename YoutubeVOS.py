@@ -22,9 +22,9 @@ class YTVOSDataset(Dataset):
         self.test_query_frame_num = test_query_frame_num
 
         if data_dir is None:
-            data_dir = "./datasets/YoutubeVIS-2019"
-        self.img_dir = os.path.join(data_dir, 'valid', 'JPEGImages')
-        self.ann_file = os.path.join(data_dir, 'valid', 'instances_val_sub.json')
+            data_dir = "./datasets/YoutubeVIS-2019/train"
+        self.img_dir = os.path.join(data_dir, 'JPEGImages')
+        self.ann_file = os.path.join(data_dir, 'instances.json')
 
         self.load_annotations()
 
