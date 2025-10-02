@@ -141,6 +141,7 @@ class SAM2_FSVOS:
             if query_frame_idx in video_segments and obj_id in video_segments[query_frame_idx]:
                 mask = video_segments[query_frame_idx][obj_id]
                 segmented_masks.append(mask)
+                print(np.sum(mask), "non-zero elements in the predicted mask")
                 # Save visualization
                 self.save_mask_overlay(query_frame, mask, f"{prediction_dir}/out_{i:04d}.png")
                 # print("overlay of the ground truth")

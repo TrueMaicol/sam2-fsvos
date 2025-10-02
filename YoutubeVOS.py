@@ -22,7 +22,7 @@ class YTVOSDataset(Dataset):
         self.test_query_frame_num = test_query_frame_num
 
         if data_dir is None:
-            data_dir = "./datasets/YoutubeVIS-2019/train"
+            data_dir = "./datasets/Youtube-FSVOS/train"
         self.img_dir = os.path.join(data_dir, 'JPEGImages')
         self.ann_file = os.path.join(data_dir, 'instances.json')
 

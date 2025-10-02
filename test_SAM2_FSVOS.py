@@ -12,7 +12,7 @@ def get_arguments():
         parser.add_argument("--output_dir", type=str, default="./output")
         parser.add_argument("--group", type=int, default=1)
         parser.add_argument("--test_query_frame_num", type=int, default=None)
-        parser.add_argument("--verbose", default=False)
+        parser.add_argument("--verbose", type=bool, default=False)
 
         return parser.parse_args()
 
@@ -22,16 +22,17 @@ def youtube_fsvos_test(predictor):
     results = {}
 
     for i in range(5):
-        print(f"Trial {i+1}/5 started")
+        print(f"Trial {i+1}/5 started!")
         results[f"trial_{i}"] = {}  # Initialize the trial dictionary
 
         for j in range(1, 5):
-                print(f"Evaluating on fold {j}")
+                print(f"Started evaluation on fold {j}")
 
                 mean_f, mean_j, score_dict = predictor.test(group=j)
 
+                print(f"Trial {i+1}/5, Fold {j}/4 results:")
                 print(f"Group {j} - Mean F: {mean_f}, Mean J: {mean_j}")
-                print(f"Detailed Scores: {json.dumps(score_dict, indent=4)}")
+                print(f"Detailed Scores: {json.dumps(score_dict, indent=4)} \n \n \n")
 
                 results[f"trial_{i}"][f"fold_{j}"] = {
                     "mean_f": mean_f,
@@ -57,11 +58,13 @@ def main():
         test_query_frame_num=args.test_query_frame_num
     )
 
-    mean_f, mean_j, score_dict = sam2_predictor.test(group=2)
-    print(f"Group 2 - Mean F: {mean_f}, Mean J: {mean_j}")
-    print(f"Detailed Scores: {json.dumps(score_dict, indent=4)}")
+    # mean_f, mean_j, score_dict = sam2_predictor.test(group=2)
+    # print(f"Group 2 - Mean F: {mean_f}, Mean J: {mean_j}")
+    # print(f"Detailed Scores: {json.dumps(score_dict, indent=4)}")
 
-
+    results = youtube_fsvos_test(sam2_predictor)
+    print("Final Results from all trials and folds:")
+    print(json.dumps(results, indent=4))
 
 if __name__ == '__main__':
     main()

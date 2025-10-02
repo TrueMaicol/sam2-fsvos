@@ -83,7 +83,7 @@ def seg2bmap(seg,width=None,height=None):
 	 January 2003
  """
 
-	seg = seg.astype(np.bool)
+	seg = seg.astype(np.bool_)
 	seg[seg>0] = 1
 
 	assert np.atleast_3d(seg).shape[2] == 1
@@ -135,8 +135,8 @@ def db_eval_iou(annotation,segmentation):
         jaccard (float): region similarity
  """
 
-    annotation   = annotation.astype(np.bool)
-    segmentation = segmentation.astype(np.bool)
+    annotation   = annotation.astype(np.bool_)
+    segmentation = segmentation.astype(np.bool_)
 
     if np.isclose(np.sum(annotation),0) and np.isclose(np.sum(segmentation),0):
         return 1

@@ -148,3 +148,8 @@ Expected YouTube-VIS 2019 dataset organization:
     └── instances_val_sub.json  # COCO-format annotations
 ```
 
+## Template command
+
+```bash
+python test_SAM2_FSVOS.py --checkpoint sam2.1_hiera_base_plus.pt --config sam2.1/sam2.1_hiera_b+.yaml --session_name full_test_small_1 --test_query_frame_num 5
+```
