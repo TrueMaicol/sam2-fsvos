@@ -1,6 +1,3 @@
-from datetime import datetime
-from utils.Evaluator import Evaluator
-from YoutubeVOS import YTVOSDataset
 import torch 
 import numpy as np
 from sam2.build_sam import build_sam2_video_predictor
@@ -86,8 +83,7 @@ class SAM2_FSVOS:
 
         return frames_dir, output_dir, ground_truth_dir
 
-    def process_video_sam2(self, data, video_predictor, evaluator, support_set, device, data_dir="./output"):
-        video_query_img, video_query_mask, _, _, idx, dir_name, _ = data
+    def process_video_sam2(self, video_query_img, dir_name, video_predictor, support_set, device, data_dir="./output"):
 
         # print(f"Length of query gt: {len(video_query_mask)}")
         # print(f"Shape of gt mask: {video_query_mask[0].shape}")
@@ -144,8 +140,7 @@ class SAM2_FSVOS:
                 print(np.sum(mask), "non-zero elements in the predicted mask")
                 # Save visualization
                 self.save_mask_overlay(query_frame, mask, f"{prediction_dir}/out_{i:04d}.png")
-                # print("overlay of the ground truth")
-                self.save_mask_overlay(query_frame, video_query_mask[i], f"{ground_truth_dir}/gt_{i:04d}.png")
+                
                 print(f"Successfully processed query frame {i}")
             else:
                 # No mask found, append empty mask
@@ -154,71 +149,52 @@ class SAM2_FSVOS:
                 print(f"No mask found for query frame {i}")
         
         print(f"Segmentation complete! Generated {len(segmented_masks)} masks")
-        print("Updating evaluation metrics")
-        evaluator.update_evl(idx, video_query_mask, segmented_masks)
         
         return segmented_masks
 
-    def save_evaluation_results(self, output_directory, mean_f, mean_j, score_dict):
-        results_path = os.path.join(output_directory, "evaluation_results.txt")
-        with open(results_path, 'w') as f:
-            f.write(f"Mean F: {mean_f:.4f}\n")
-            f.write(f"Mean J: {mean_j:.4f}\n\n")
-            f.write("Detailed Scores:\n")
-            for class_id, scores in score_dict.items():
-                f.write(f"Class {class_id} - F: {scores['f_score']:.4f}, J: {scores['j_score']:.4f}\n")
-        print(f"Saved evaluation results to {results_path}")
+    def load_test_data(self, n_support_frames):
+        test_dataset = []
+        for i, dir in enumerate(os.listdir(self.dataset_path)):
+            if os.path.isdir(os.path.join(self.dataset_path, dir)):
+                temp = {}
+                support_set = []
+                video_query_img = []
+                for j, frame in enumerate(os.listdir(os.path.join(self.dataset_path, dir, "frames"))):
+                    if j < n_support_frames:
+                        img = Image.open(os.path.join(self.dataset_path, dir, "frames", frame))
+                        img = np.array(img)
+                        mask = np.array(Image.open(os.path.join(self.dataset_path, dir, "ground_truth", f"support_{j:04d}_annotation.png")))
+                        mask = np.array(mask)
+                        support_set.append((img, mask))
+                    else:
+                        img = Image.open(os.path.join(self.dataset_path, dir, "frames", frame))
+                        img = np.array(img)
+                        video_query_img.append(img)
 
-    def test(self, group=1):
+                temp["dir_name"] = dir
+                temp["support_set"] = support_set
+                temp["video_query_img"] = video_query_img
+                test_dataset.append(temp)
+        return test_dataset
+
+    def test(self):
         device = self.device
         video_predictor = self.video_predictor
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_directory = f"{self.output_dir}/{self.session_name}/fold_{group}_{timestamp}"
+        output_directory = f"{self.output_dir}/{self.session_name}"
         if self.output_dir is None:
-            output_directory = f"./output/{self.session_name}/fold_{group}_{timestamp}"
+            output_directory = f"./output/{self.session_name}"
         
         os.makedirs(output_directory, exist_ok=True)
 
-        test_dataset = YTVOSDataset(train=False, set_index=group, data_dir=self.dataset_path, test_query_frame_num=self.test_query_frame_num)
-        test_list = test_dataset.get_class_list()
+        test_dataset = self.load_test_data(5)
 
-        print('test_group:',group, '  test_num:', len(test_dataset), '  class_list:', test_list, ' dataset_path:', self.dataset_path)
-
-        test_evaluations = Evaluator(class_list=test_list, verbose=self.verbose)
         support_set = []
         for index, data in enumerate(test_dataset):
-            _,_, new_support_img, new_support_mask, idx, _, begin_new = data
-            if begin_new:
-                support_set = [(img, mask) for img, mask in zip(new_support_img, new_support_mask)]
-                print(f"Support set for class {idx} initialized with {len(support_set)} images.")
+            dir_name = data["dir_name"]
+            support_set = data["support_set"]
+            video_query_img = data["video_query_img"]
 
-            self.process_video_sam2(data, video_predictor, test_evaluations, support_set, device, data_dir=output_directory)
-            
-            print(f"F-score list: {test_evaluations.f_score}")
-            print(f"J-score list: {test_evaluations.j_score}")
-
-        mean_f = np.mean(test_evaluations.f_score)
-        str_mean_f = 'F: %.4f ' % (mean_f)
-        mean_j = np.mean(test_evaluations.j_score)
-        str_mean_j = 'J: %.4f ' % (mean_j)
-        
-        f_list = ['%.4f' % n for n in test_evaluations.f_score]
-        str_f_list = ' '.join(f_list)
-        j_list = ['%.4f' % n for n in test_evaluations.j_score]
-        str_j_list = ' '.join(j_list)
-        # Generate dictionary with class id as key and f_score, j_score as values
-        score_dict = {
-            class_id: {"f_score": f, "j_score": j}
-            for class_id, f, j in zip(test_list, test_evaluations.f_score, test_evaluations.j_score)
-        }
-
-        print(str_mean_f, str_f_list + '\n')
-        print(str_mean_j, str_j_list + '\n')
-
-        # Save evaluation results
-        self.save_evaluation_results(output_directory, mean_f, mean_j, score_dict)
-
-        return mean_f, mean_j, score_dict
+            self.process_video_sam2(video_query_img, dir_name, video_predictor, support_set, device, data_dir=output_directory)
 
 
