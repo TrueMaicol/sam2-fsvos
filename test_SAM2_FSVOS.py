@@ -17,31 +17,6 @@ def get_arguments():
         return parser.parse_args()
 
 
-def youtube_fsvos_test(predictor):
-
-    results = {}
-
-    for i in range(5):
-        print(f"Trial {i+1}/5 started!")
-        results[f"trial_{i}"] = {}  # Initialize the trial dictionary
-
-        for j in range(1, 5):
-                print(f"Started evaluation on fold {j}")
-
-                mean_f, mean_j, score_dict = predictor.test(group=j)
-
-                print(f"Trial {i+1}/5, Fold {j}/4 results:")
-                print(f"Group {j} - Mean F: {mean_f}, Mean J: {mean_j}")
-                print(f"Detailed Scores: {json.dumps(score_dict, indent=4)} \n \n \n")
-
-                results[f"trial_{i}"][f"fold_{j}"] = {
-                    "mean_f": mean_f,
-                    "mean_j": mean_j,
-                    "detailed_scores": score_dict
-                }
-
-    return results
-
 def main():
     args = get_arguments()
     
@@ -58,13 +33,8 @@ def main():
         test_query_frame_num=args.test_query_frame_num
     )
 
-    # mean_f, mean_j, score_dict = sam2_predictor.test(group=2)
-    # print(f"Group 2 - Mean F: {mean_f}, Mean J: {mean_j}")
-    # print(f"Detailed Scores: {json.dumps(score_dict, indent=4)}")
+    sam2_predictor.test()
 
-    results = youtube_fsvos_test(sam2_predictor)
-    print("Final Results from all trials and folds:")
-    print(json.dumps(results, indent=4))
 
 if __name__ == '__main__':
     main()
