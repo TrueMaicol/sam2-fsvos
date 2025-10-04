@@ -123,19 +123,18 @@ class SAM2_FSVOS:
 
         # Load query frames in sorted order
         segmented_masks = []
+        # Propagate masks to this frame
+        video_segments = {}
+        for out_frame_idx, out_obj_ids, out_mask_logits in video_predictor.propagate_in_video(inference_state):
+            video_segments[out_frame_idx] = {
+                out_obj_id: (out_mask_logits[j] > 0.0).cpu().numpy()
+                for j, out_obj_id in enumerate(out_obj_ids)
+            }
 
         for i, query_img in enumerate(video_query_img):
             print(f"Processing query frame {i}")
             query_frame = np.array(query_img)
             query_frame_idx = len(support_set) + i
-            
-            # Propagate masks to this frame
-            video_segments = {}
-            for out_frame_idx, out_obj_ids, out_mask_logits in video_predictor.propagate_in_video(inference_state):
-                video_segments[out_frame_idx] = {
-                    out_obj_id: (out_mask_logits[j] > 0.0).cpu().numpy()
-                    for j, out_obj_id in enumerate(out_obj_ids)
-                }
             
             # Extract mask for current query frame
             if query_frame_idx in video_segments and obj_id in video_segments[query_frame_idx]:
