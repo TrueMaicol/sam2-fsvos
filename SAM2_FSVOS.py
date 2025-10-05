@@ -163,7 +163,7 @@ class SAM2_FSVOS:
                     if j < n_support_frames:
                         img = Image.open(os.path.join(self.dataset_path, dir, "frames", frame))
                         img = np.array(img)
-                        mask = np.array(Image.open(os.path.join(self.dataset_path, dir, "ground_truth", f"support_{j:04d}_annotation.png")))
+                        mask = np.array(Image.open(os.path.join(self.dataset_path, dir, "ground_truth", f"{j:04d}.png")))
                         mask = np.array(mask)
                         support_set.append((img, mask))
                     else:
