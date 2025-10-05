@@ -212,6 +212,34 @@ class YTVOSDataset(Dataset):
     def get_class_list(self):
         return self.class_list
 
+    def get_reprod_test_dataset(self, class_id=None):
+        assert class_id is not None
+        
+        support_set = []
+        query_set = []
+
+        support_frames, support_masks = [], []
+        vid_set = self.video_ids[class_id]
+        support_vid = random.sample(vid_set, self.support_frame)
+        
+        for i in range(self.support_frame):
+            one_frame, one_mask = self.get_GT_byclass(support_vid[i], self.class_list[class_id], 1)
+            print("Support video ID: ", support_vid[i])
+            support_frames += one_frame
+            support_masks += one_mask
+        
+
+        query_vids = []
+        for id in vid_set:
+            if not id in support_vid:
+                query_vids.append(id)
+        query_vids = random.sample(query_vids, 5)
+        for i in range(len(query_vids)):
+            query_vid = query_vids[i]
+            print("Query video ID: ", query_vid)
+            query_frames, query_masks = self.get_GT_byclass(query_vid, self.class_list[class_id], test=True)
+            query_set.append((query_frames, query_masks))
+        return support_frames, support_masks, query_set
 
 if __name__ == "__main__":
     ytvos = YTVOSDataset(train=True, query_frame=5, support_frame=5)
