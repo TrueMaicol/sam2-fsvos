@@ -158,15 +158,15 @@ class SAM2_FSVOS:
                 temp = {}
                 support_set = []
                 video_query_img = []
-                for j, frame in enumerate(os.listdir(os.path.join(self.dataset_path, dir, "frames"))):
+                for j in range(len(os.listdir(os.path.join(self.dataset_path, dir, "frames")))):
                     if j < n_support_frames:
-                        img = Image.open(os.path.join(self.dataset_path, dir, "frames", frame))
+                        img = Image.open(os.path.join(self.dataset_path, dir, "frames", f"support_{j:04d}.jpg"))
                         img = np.array(img)
-                        mask = np.array(Image.open(os.path.join(self.dataset_path, dir, "ground_truth", f"{j:04d}.png")))
+                        mask = np.array(Image.open(os.path.join(self.dataset_path, dir, "ground_truth", f"support_{j:04d}.png")))
                         mask = np.array(mask)
                         support_set.append((img, mask))
                     else:
-                        img = Image.open(os.path.join(self.dataset_path, dir, "frames", frame))
+                        img = Image.open(os.path.join(self.dataset_path, dir, "frames", f"query_{j:04d}.jpg"))
                         img = np.array(img)
                         video_query_img.append(img)
 

@@ -41,13 +41,13 @@ if __name__ == "__main__":
             os.makedirs(f"{args.output_dir}/class_{dataset.get_class_list()[id]}_{i}/output", exist_ok=True)
 
             for j, (img, mask) in enumerate(zip(support_frames, support_masks)):
-                save_image(img, f"{args.output_dir}/class_{dataset.get_class_list()[id]}_{i}/frames/{j:04d}.jpg")
+                save_image(img, f"{args.output_dir}/class_{dataset.get_class_list()[id]}_{i}/frames/support_{j:04d}.jpg")
                 # print("# non zero elements in mask: ", np.sum(mask))
                 mask = (mask > 0).astype(np.uint8) * 255  # Scale to 0-255 range for visibility
-                save_image(mask, f"{args.output_dir}/class_{dataset.get_class_list()[id]}_{i}/ground_truth/{j:04d}.png")
+                save_image(mask, f"{args.output_dir}/class_{dataset.get_class_list()[id]}_{i}/ground_truth/support_{j:04d}.png")
 
             for j, (img, mask) in enumerate(zip(query_frames, query_masks)):
-                save_image(img, f"{args.output_dir}/class_{dataset.get_class_list()[id]}_{i}/frames/{(j+len(support_frames)):04d}.jpg")
+                save_image(img, f"{args.output_dir}/class_{dataset.get_class_list()[id]}_{i}/frames/query_{(j+len(support_frames)):04d}.jpg")
                 # print("# non zero elements in query mask: ", np.sum(mask))
                 mask = (mask > 0).astype(np.uint8) * 255  # Scale to 0-255 range for visibility
-                save_image(mask, f"{args.output_dir}/class_{dataset.get_class_list()[id]}_{i}/ground_truth/{(j+len(support_frames)):04d}.png")
+                save_image(mask, f"{args.output_dir}/class_{dataset.get_class_list()[id]}_{i}/ground_truth/query_{(j+len(support_frames)):04d}.png")
