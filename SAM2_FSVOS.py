@@ -89,7 +89,7 @@ class SAM2_FSVOS:
         # print(f"Shape of gt mask: {video_query_mask[0].shape}")
         # print(f"MASK {np.sum(video_query_mask[0])} non-zero elements")
         # print(f"Starting the segmentation of test {dir_name} with class {idx}")
-        
+        print(f"Processing video: {dir_name}")
         base_dir = f"{data_dir}/{dir_name}"
 
         frames_dir, prediction_dir, ground_truth_dir = self.create_dirs(base_dir, video_query_img, support_set)
@@ -119,19 +119,18 @@ class SAM2_FSVOS:
 
         # Load query frames in sorted order
         segmented_masks = []
+        # Propagate masks to this frame
+        video_segments = {}
+        for out_frame_idx, out_obj_ids, out_mask_logits in video_predictor.propagate_in_video(inference_state):
+            video_segments[out_frame_idx] = {
+                out_obj_id: (out_mask_logits[j] > 0.0).cpu().numpy()
+                for j, out_obj_id in enumerate(out_obj_ids)
+            }
 
         for i, query_img in enumerate(video_query_img):
             print(f"Processing query frame {i}")
             query_frame = np.array(query_img)
             query_frame_idx = len(support_set) + i
-            
-            # Propagate masks to this frame
-            video_segments = {}
-            for out_frame_idx, out_obj_ids, out_mask_logits in video_predictor.propagate_in_video(inference_state):
-                video_segments[out_frame_idx] = {
-                    out_obj_id: (out_mask_logits[j] > 0.0).cpu().numpy()
-                    for j, out_obj_id in enumerate(out_obj_ids)
-                }
             
             # Extract mask for current query frame
             if query_frame_idx in video_segments and obj_id in video_segments[query_frame_idx]:
