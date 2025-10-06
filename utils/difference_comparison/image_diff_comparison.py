@@ -222,7 +222,7 @@ class ImageDifferenceComparator:
             return
             
         stats_file = self.output_dir / 'comparison_statistics.json'
-        
+        ordered_stat_file = self.output_dir / 'comparison_statistics_ordered.json'
         # Add summary statistics
         self.stats['summary'] = {
             'timestamp': datetime.now().isoformat(),
@@ -238,6 +238,11 @@ class ImageDifferenceComparator:
             with open(stats_file, 'w') as f:
                 json.dump(self.stats, f, indent=2)
             print(f"Statistics saved to: {stats_file}")
+            with open(ordered_stat_file, 'w') as f:
+                temp = self.stats.copy()
+                temp['differences'] = sorted(temp['differences'], key=lambda x: x['difference_percentage'], reverse=True)
+                json.dump(temp, f, indent=2)
+            print(f"Statistics saved to: {ordered_stat_file}")
         except Exception as e:
             print(f"Error saving statistics: {e}")
     
