@@ -94,7 +94,9 @@ class SAM2_FSVOS:
 
         return frames_dir, output_dir, ground_truth_dir
 
-    def process_video_sam2(self, data, video_predictor, evaluator, idx, device, data_dir="./output"):
+    @torch.inference_mode()
+    @torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+    def process_video_sam2(self, data, video_predictor, evaluator, class_id, device, data_dir="./output"):
 
         video_query_set = data["video_query_set"]
         support_set = data["support_set"]
@@ -111,6 +113,46 @@ class SAM2_FSVOS:
         
         # Initialize inference state with all frames directory
         inference_state = video_predictor.init_state(video_path=frames_dir)
+        
+        # Debug: Print the exact order SAM2 sees the frames
+        print("=== SAM2 Frame Loading Debug ===")
+        
+        # Show what files we created in the frames directory
+        import os
+        frame_files = [f for f in os.listdir(frames_dir) if f.endswith('.jpg')]
+        frame_files.sort(key=lambda p: int(os.path.splitext(p)[0]))
+        print(f"Files in frames directory: {frame_files}")
+        
+        # Show what SAM2 actually loaded (from inference state)
+        print(f"SAM2 loaded {inference_state['num_frames']} frames")
+        print(f"Video dimensions: {inference_state['video_height']}x{inference_state['video_width']}")
+        
+        # Show the mapping between frame indices and file names
+        print("Frame index to filename mapping:")
+        for idx, filename in enumerate(frame_files):
+            frame_type = "SUPPORT" if idx < len(support_set) else "QUERY"
+            local_idx = idx if idx < len(support_set) else idx - len(support_set)
+            print(f"  Frame {idx}: {filename} -> {frame_type} {local_idx}")
+        
+        print(f"Support frames: 0-{len(support_set)-1}")
+        print(f"Query frames: {len(support_set)}-{len(support_set) + len(video_query_set) - 1}")
+        
+        # Show the exact frame paths SAM2 will use (mimicking SAM2's internal logic)
+        sam2_frame_order = []
+        for p in os.listdir(frames_dir):
+            if os.path.splitext(p)[-1] in [".jpg", ".jpeg", ".JPG", ".JPEG"]:
+                sam2_frame_order.append(p)
+        sam2_frame_order.sort(key=lambda p: int(os.path.splitext(p)[0]))
+        print(f"SAM2 internal frame order: {sam2_frame_order}")
+        
+        # Verification: Check if our ordering matches SAM2's ordering
+        our_order_matches = frame_files == sam2_frame_order
+        print(f"Our frame order matches SAM2's internal order: {our_order_matches}")
+        if not our_order_matches:
+            print("WARNING: Frame ordering mismatch detected!")
+            print(f"Our order: {frame_files}")
+            print(f"SAM2 order: {sam2_frame_order}")
+        print("=== End Debug ===\n")
 
         print("Loading support frames and their masks into SAM2")
         
@@ -118,8 +160,7 @@ class SAM2_FSVOS:
 
         # Add support frame masks to the predictor
         for i, (img, mask) in enumerate(support_set):
-            mask_binary = (mask > 0).astype(np.uint8)  # Ensure binary mask
-            mask_tensor = torch.tensor(mask_binary, dtype=torch.bool, device=device)
+            mask_tensor = torch.tensor(mask > 0, dtype=torch.bool, device=device)
             
             video_predictor.add_new_mask(
                 inference_state=inference_state,
@@ -127,8 +168,9 @@ class SAM2_FSVOS:
                 obj_id=obj_id,
                 mask=mask_tensor
             )
-            self.save_mask_overlay(img, mask_binary > 0, os.path.join(ground_truth_dir, f"support_{i:04d}.png"))
-            print(f"Added support frame {i}")
+            self.save_mask_overlay(img, mask_tensor.cpu().numpy(), os.path.join(ground_truth_dir, f"support_{i:04d}.png"))
+            print(f"Added support frame {i} (corresponds to frame file {i:05d}.jpg)")
+            print(f"  Mask has {torch.sum(mask_tensor).item()} non-zero pixels")
 
         print("Processing query video...")
 
@@ -152,20 +194,20 @@ class SAM2_FSVOS:
             if query_frame_idx in video_segments and obj_id in video_segments[query_frame_idx]:
                 mask = video_segments[query_frame_idx][obj_id]
                 segmented_masks.append(mask)
-                print(np.sum(mask), "non-zero elements in the predicted mask")
+                print(f"  Found mask with {np.sum(mask)} non-zero elements")
                 # Save visualization
                 self.save_mask_overlay(query_frame, mask, f"{prediction_dir}/out_{i:04d}.png")
                 self.save_mask_overlay(query_frame, query_mask, f"{ground_truth_dir}/query_{i:04d}.png")
-                print(f"Successfully processed query frame {i}")
+                print(f"  Successfully processed query frame {i}")
             else:
                 # No mask found, append empty mask
                 empty_mask = np.zeros((query_frame.shape[0], query_frame.shape[1]), dtype=bool)
                 segmented_masks.append(empty_mask)
-                print(f"No mask found for query frame {i}")
-        
+                print(f"  WARNING: No mask found for query frame {i} (frame_idx {query_frame_idx})")
+               
         print(f"Segmentation complete! Generated {len(segmented_masks)} masks")
         print("Updating evaluation metrics")
-        evaluator.update_evl(idx, query_masks_gt, segmented_masks)
+        evaluator.update_evl(class_id, query_masks_gt, segmented_masks)
         
         return segmented_masks
 
@@ -226,7 +268,7 @@ class SAM2_FSVOS:
         test_evaluations = Evaluator(class_list=test_list, verbose=self.verbose)
         test_dataset = self.load_test_data(n_support_frames=n_support_frames)
 
-        self.reset_reproducibility(seed=42, verbose=True)
+        # self.reset_reproducibility(seed=42, verbose=True)
 
         support_set = []
         for index, data in enumerate(test_dataset):
