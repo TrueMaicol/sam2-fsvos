@@ -30,7 +30,8 @@ def main():
         dataset_path=args.dataset_path,
         output_dir=args.output_dir,
         verbose=args.verbose,
-        test_query_frame_num=args.test_query_frame_num
+        test_query_frame_num=args.test_query_frame_num,
+        group=args.group
     )
 
     sam2_predictor.test()

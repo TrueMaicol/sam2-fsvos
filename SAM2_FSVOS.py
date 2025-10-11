@@ -4,9 +4,11 @@ from sam2.build_sam import build_sam2_video_predictor
 import os
 from PIL import Image
 import cv2
+import random 
+from utils.Evaluator import Evaluator
 
 class SAM2_FSVOS:
-    def __init__(self, checkpoint, config, session_name, dataset_path, output_dir, verbose, test_query_frame_num):
+    def __init__(self, checkpoint, config, session_name, dataset_path, output_dir, verbose, test_query_frame_num, group=1):
         # self.args = args
         if checkpoint is None:
             print("No checkpoint path provided. Exiting")
@@ -23,13 +25,22 @@ class SAM2_FSVOS:
         self.output_dir = output_dir
         self.verbose = verbose
         self.test_query_frame_num = test_query_frame_num        
-
+        self.group = group
         # checkpoint = "./checkpoints/sam2.1_hiera_tiny.pt"
         # model_cfg = "configs/sam2.1/sam2.1_hiera_t.yaml"
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.video_predictor = build_sam2_video_predictor(self.model_cfg, self.checkpoint, device=self.device)
         print("Successfully loaded SAM2 model")
                 
+    def save_evaluation_results(self, output_directory, mean_f, mean_j, score_dict):
+        results_path = os.path.join(output_directory, "evaluation_results.txt")
+        with open(results_path, 'w') as f:
+            f.write(f"Mean F: {mean_f:.8f}\n")
+            f.write(f"Mean J: {mean_j:.8f}\n\n")
+            f.write("Detailed Scores:\n")
+            for class_id, scores in score_dict.items():
+                f.write(f"Class {class_id} - F: {scores['f_score']:.8f}, J: {scores['j_score']:.8f}\n")
+        print(f"Saved evaluation results to {results_path}")
 
     def save_mask_overlay(self, image, mask, output_path):
         """Save image with mask overlay"""
@@ -65,7 +76,7 @@ class SAM2_FSVOS:
             image = Image.fromarray(image)
         image.save(path)
 
-    def create_dirs(self, base_dir, video_query_img, support_set):
+    def create_dirs(self, base_dir, video_query_set, support_set):
         
         frames_dir = os.path.join(base_dir, "frames")
         output_dir = os.path.join(base_dir, "output")
@@ -78,12 +89,16 @@ class SAM2_FSVOS:
         for i, (img, _) in enumerate(support_set):
             self.save_image(img, os.path.join(frames_dir, f"{i:04d}.jpg"))
 
-        for i, img in enumerate(video_query_img):
+        for i, (img, _) in enumerate(video_query_set):
             self.save_image(img, os.path.join(frames_dir, f"{i + len(support_set):04d}.jpg"))
 
         return frames_dir, output_dir, ground_truth_dir
 
-    def process_video_sam2(self, video_query_img, dir_name, video_predictor, support_set, device, data_dir="./output"):
+    def process_video_sam2(self, data, video_predictor, evaluator, idx, device, data_dir="./output"):
+
+        video_query_set = data["video_query_set"]
+        support_set = data["support_set"]
+        dir_name = data["dir_name"]
 
         # print(f"Length of query gt: {len(video_query_mask)}")
         # print(f"Shape of gt mask: {video_query_mask[0].shape}")
@@ -92,7 +107,7 @@ class SAM2_FSVOS:
         print(f"Processing video: {dir_name}")
         base_dir = f"{data_dir}/{dir_name}"
 
-        frames_dir, prediction_dir, ground_truth_dir = self.create_dirs(base_dir, video_query_img, support_set)
+        frames_dir, prediction_dir, ground_truth_dir = self.create_dirs(base_dir, video_query_set, support_set)
         
         # Initialize inference state with all frames directory
         inference_state = video_predictor.init_state(video_path=frames_dir)
@@ -127,7 +142,8 @@ class SAM2_FSVOS:
                 for j, out_obj_id in enumerate(out_obj_ids)
             }
 
-        for i, query_img in enumerate(video_query_img):
+        query_masks_gt = [mask for _, mask in video_query_set]
+        for i, (query_img, query_mask) in enumerate(video_query_set):
             print(f"Processing query frame {i}")
             query_frame = np.array(query_img)
             query_frame_idx = len(support_set) + i
@@ -139,7 +155,7 @@ class SAM2_FSVOS:
                 print(np.sum(mask), "non-zero elements in the predicted mask")
                 # Save visualization
                 self.save_mask_overlay(query_frame, mask, f"{prediction_dir}/out_{i:04d}.png")
-                
+                self.save_mask_overlay(query_frame, query_mask, f"{ground_truth_dir}/query_{i:04d}.png")
                 print(f"Successfully processed query frame {i}")
             else:
                 # No mask found, append empty mask
@@ -148,16 +164,18 @@ class SAM2_FSVOS:
                 print(f"No mask found for query frame {i}")
         
         print(f"Segmentation complete! Generated {len(segmented_masks)} masks")
+        print("Updating evaluation metrics")
+        evaluator.update_evl(idx, query_masks_gt, segmented_masks)
         
         return segmented_masks
 
-    def load_test_data(self, n_support_frames):
+    def load_test_data(self, n_support_frames=5):
         test_dataset = []
         for i, dir in enumerate(os.listdir(self.dataset_path)):
             if os.path.isdir(os.path.join(self.dataset_path, dir)):
                 temp = {}
                 support_set = []
-                video_query_img = []
+                video_query_set = []
                 for j in range(len(os.listdir(os.path.join(self.dataset_path, dir, "frames")))):
                     if j < n_support_frames:
                         img = Image.open(os.path.join(self.dataset_path, dir, "frames", f"support_{j:04d}.jpg"))
@@ -168,32 +186,75 @@ class SAM2_FSVOS:
                     else:
                         img = Image.open(os.path.join(self.dataset_path, dir, "frames", f"query_{j:04d}.jpg"))
                         img = np.array(img)
-                        video_query_img.append(img)
+                        mask = np.array(Image.open(os.path.join(self.dataset_path, dir, "ground_truth", f"query_{j:04d}.png")))
+                        mask = np.array(mask)
+                        video_query_set.append((img, mask))
 
                 temp["dir_name"] = dir
                 temp["support_set"] = support_set
-                temp["video_query_img"] = video_query_img
+                temp["video_query_set"] = video_query_set
                 test_dataset.append(temp)
         return test_dataset
+
+    def reset_reproducibility(self, seed: int = 42, verbose: bool = True):
+        """
+        Reset Python, NumPy, and Torch seeds for reproducibility.
+        Does not force deterministic kernels.
+        """
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        os.environ["PYTHONHASHSEED"] = str(seed)
+
+        if verbose:
+            print(f"[Seeds reset to {seed}]")
 
     def test(self):
         device = self.device
         video_predictor = self.video_predictor
+        n_support_frames = 5
 
         output_directory = f"{self.output_dir}/{self.session_name}"
         if self.output_dir is None:
             output_directory = f"./output/{self.session_name}"
-        
+
+        test_list = [i * 4 + self.group for i in range(10)]
+        print(f"Testing on classes: {test_list}")
         os.makedirs(output_directory, exist_ok=True)
 
-        test_dataset = self.load_test_data(5)
+        test_evaluations = Evaluator(class_list=test_list, verbose=self.verbose)
+        test_dataset = self.load_test_data(n_support_frames=n_support_frames)
+
+        self.reset_reproducibility(seed=42, verbose=True)
 
         support_set = []
         for index, data in enumerate(test_dataset):
             dir_name = data["dir_name"]
-            support_set = data["support_set"]
-            video_query_img = data["video_query_img"]
+            class_id = int(dir_name.split("_")[1])
 
-            self.process_video_sam2(video_query_img, dir_name, video_predictor, support_set, device, data_dir=output_directory)
+            self.process_video_sam2(data, video_predictor, test_evaluations, class_id, device, data_dir=output_directory)
+
+        mean_f = np.mean(test_evaluations.f_score)
+        str_mean_f = 'F: %.8f ' % (mean_f)
+        mean_j = np.mean(test_evaluations.j_score)
+        str_mean_j = 'J: %.8f ' % (mean_j)
+        
+        f_list = ['%.8f' % n for n in test_evaluations.f_score]
+        str_f_list = ' '.join(f_list)
+        j_list = ['%.8f' % n for n in test_evaluations.j_score]
+        str_j_list = ' '.join(j_list)
+        # Generate dictionary with class id as key and f_score, j_score as values
+        score_dict = {
+            class_id: {"f_score": f, "j_score": j}
+            for class_id, f, j in zip(test_list, test_evaluations.f_score, test_evaluations.j_score)
+        }
+
+        print(str_mean_f, str_f_list + '\n')
+        print(str_mean_j, str_j_list + '\n')
+
+        # Save evaluation results
+        self.save_evaluation_results(output_directory, mean_f, mean_j, score_dict)
+    
 
 
