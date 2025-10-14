@@ -29,7 +29,7 @@ class SAM2_FSVOS:
         # checkpoint = "./checkpoints/sam2.1_hiera_tiny.pt"
         # model_cfg = "configs/sam2.1/sam2.1_hiera_t.yaml"
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.video_predictor = build_sam2_video_predictor(self.model_cfg, self.checkpoint, device=self.device)
+        self.video_predictor = build_sam2_video_predictor(self.model_cfg, self.checkpoint, device=self.device, apply_postprocessing=False)
         print("Successfully loaded SAM2 model")
                 
     def save_evaluation_results(self, output_directory, mean_f, mean_j, score_dict):
@@ -95,7 +95,7 @@ class SAM2_FSVOS:
         return frames_dir, output_dir, ground_truth_dir
 
     @torch.inference_mode()
-    @torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+    @torch.autocast(device_type="cuda", dtype=torch.float32)
     def process_video_sam2(self, data, video_predictor, evaluator, class_id, device, data_dir="./output"):
 
         video_query_set = data["video_query_set"]
