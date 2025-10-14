@@ -55,11 +55,11 @@ def put_per_obj_mask(per_obj_mask, height, width):
 
 
 def load_masks_from_dir(
-    input_mask_dir, video_name, frame_name, per_obj_png_file, allow_missing=False
+    input_mask_dir, frame_name, per_obj_png_file, allow_missing=False
 ):
     """Load masks from a directory as a dict of per-object masks."""
     if not per_obj_png_file:
-        input_mask_path = os.path.join(input_mask_dir, video_name, f"{frame_name}.png")
+        input_mask_path = os.path.join(input_mask_dir, f"{frame_name}.png")
         if allow_missing and not os.path.exists(input_mask_path):
             return {}, None
         input_mask, input_palette = load_ann_png(input_mask_path)
@@ -68,10 +68,10 @@ def load_masks_from_dir(
         per_obj_input_mask = {}
         input_palette = None
         # each object is a directory in "{object_id:%03d}" format
-        for object_name in os.listdir(os.path.join(input_mask_dir, video_name)):
+        for object_name in os.listdir(os.path.join(input_mask_dir)):
             object_id = int(object_name)
             input_mask_path = os.path.join(
-                input_mask_dir, video_name, object_name, f"{frame_name}.png"
+                input_mask_dir, object_name, f"{frame_name}.png"
             )
             if allow_missing and not os.path.exists(input_mask_path):
                 continue
@@ -114,7 +114,7 @@ def save_masks_to_dir(
 
 
 @torch.inference_mode()
-@torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+@torch.autocast(device_type="cuda", dtype=torch.float16)
 def vos_inference(
     predictor,
     base_video_dir,
@@ -218,7 +218,7 @@ def vos_inference(
             "in the first frame (such as LVOS or YouTube-VOS)."
         )
     # run propagation throughout the video and collect the results in a dict
-    os.makedirs(os.path.join(output_mask_dir, video_name), exist_ok=True)
+    # os.makedirs(os.path.join(output_mask_dir, video_name), exist_ok=True)
     output_palette = input_palette or DAVIS_PALETTE
     video_segments = {}  # video_segments contains the per-frame segmentation results
     for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(
@@ -231,29 +231,29 @@ def vos_inference(
         video_segments[out_frame_idx] = per_obj_output_mask
 
     # write the output masks as palette PNG files to output_mask_dir
-    for out_frame_idx, per_obj_output_mask in video_segments.items():
-        save_masks_to_dir(
-            output_mask_dir=output_mask_dir,
-            video_name=video_name,
-            frame_name=frame_names[out_frame_idx],
-            per_obj_output_mask=per_obj_output_mask,
-            height=height,
-            width=width,
-            per_obj_png_file=per_obj_png_file,
-            output_palette=output_palette,
-        )
+    # for out_frame_idx, per_obj_output_mask in video_segments.items():
+    #     save_masks_to_dir(
+    #         output_mask_dir=output_mask_dir,
+    #         video_name=video_name,
+    #         frame_name=frame_names[out_frame_idx],
+    #         per_obj_output_mask=per_obj_output_mask,
+    #         height=height,
+    #         width=width,
+    #         per_obj_png_file=per_obj_png_file,
+    #         output_palette=output_palette,
+    #     )
 
 
 @torch.inference_mode()
-@torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+@torch.autocast(device_type="cuda", dtype=torch.float16)
 def vos_separate_inference_per_object(
     predictor,
-    base_video_dir,
+    video_dir,
     input_mask_dir,
     output_mask_dir,
     video_name,
     score_thresh=0.0,
-    use_all_masks=False,
+    use_all_masks=True,
     per_obj_png_file=False,
 ):
     """
@@ -265,7 +265,6 @@ def vos_separate_inference_per_object(
     might appear only later in the video).
     """
     # load the video frames and initialize the inference state on this video
-    video_dir = os.path.join(base_video_dir, video_name)
     frame_names = [
         os.path.splitext(p)[0]
         for p in os.listdir(video_dir)
@@ -273,8 +272,9 @@ def vos_separate_inference_per_object(
     ]
     frame_names.sort(key=lambda p: int(os.path.splitext(p)[0]))
     inference_state = predictor.init_state(
-        video_path=video_dir, async_loading_frames=False
+        video_path=video_dir
     )
+
     height = inference_state["video_height"]
     width = inference_state["video_width"]
     input_palette = None
@@ -283,15 +283,15 @@ def vos_separate_inference_per_object(
     inputs_per_object = defaultdict(dict)
     for idx, name in enumerate(frame_names):
         if per_obj_png_file or os.path.exists(
-            os.path.join(input_mask_dir, video_name, f"{name}.png")
+            os.path.join(input_mask_dir, f"{name}.png")
         ):
             per_obj_input_mask, input_palette = load_masks_from_dir(
                 input_mask_dir=input_mask_dir,
-                video_name=video_name,
                 frame_name=frame_names[idx],
                 per_obj_png_file=per_obj_png_file,
-                allow_missing=True,
+                allow_missing=False,
             )
+            
             for object_id, object_mask in per_obj_input_mask.items():
                 # skip empty masks
                 if not np.any(object_mask):
@@ -299,7 +299,7 @@ def vos_separate_inference_per_object(
                 # if `use_all_masks=False`, we only use the first mask for each object
                 if len(inputs_per_object[object_id]) > 0 and not use_all_masks:
                     continue
-                print(f"adding mask from frame {idx} as input for {object_id=}")
+                print(f"adding mask from frame {idx} as input for object_id {object_id}")
                 inputs_per_object[object_id][idx] = object_mask
 
     # run inference separately for each object in the video
@@ -316,7 +316,6 @@ def vos_separate_inference_per_object(
                 obj_id=object_id,
                 mask=inputs_per_object[object_id][input_frame_idx],
             )
-
         # run propagation throughout the video and collect the results in a dict
         for out_frame_idx, _, out_mask_logits in predictor.propagate_in_video(
             inference_state,
@@ -327,7 +326,7 @@ def vos_separate_inference_per_object(
             output_scores_per_object[object_id][out_frame_idx] = obj_scores
 
     # post-processing: consolidate the per-object scores into per-frame masks
-    os.makedirs(os.path.join(output_mask_dir, video_name), exist_ok=True)
+    # os.makedirs(os.path.join(output_mask_dir, video_name), exist_ok=True)
     output_palette = input_palette or DAVIS_PALETTE
     video_segments = {}  # video_segments contains the per-frame segmentation results
     for frame_idx in range(len(frame_names)):
@@ -342,8 +341,8 @@ def vos_separate_inference_per_object(
                     output_scores_per_object[object_id][frame_idx]
                 )
 
-        if not per_obj_png_file:
-            scores = predictor._apply_non_overlapping_constraints(scores)
+        # if not per_obj_png_file:
+        #     scores = predictor._apply_non_overlapping_constraints(scores)
         per_obj_output_mask = {
             object_id: (scores[i] > score_thresh).cpu().numpy()
             for i, object_id in enumerate(object_ids)
@@ -351,17 +350,20 @@ def vos_separate_inference_per_object(
         video_segments[frame_idx] = per_obj_output_mask
 
     # write the output masks as palette PNG files to output_mask_dir
-    for frame_idx, per_obj_output_mask in video_segments.items():
-        save_masks_to_dir(
-            output_mask_dir=output_mask_dir,
-            video_name=video_name,
-            frame_name=frame_names[frame_idx],
-            per_obj_output_mask=per_obj_output_mask,
-            height=height,
-            width=width,
-            per_obj_png_file=per_obj_png_file,
-            output_palette=output_palette,
-        )
+    # for frame_idx, per_obj_output_mask in video_segments.items():
+    #     save_masks_to_dir(
+    #         output_mask_dir=output_mask_dir,
+    #         video_name=video_name,
+    #         frame_name=frame_names[frame_idx],
+    #         per_obj_output_mask=per_obj_output_mask,
+    #         height=height,
+    #         width=width,
+    #         per_obj_png_file=per_obj_png_file,
+    #         output_palette=output_palette,
+    #     )
+    # video segments is a dict of {frame_idx: {obj_id: mask}}
+    # if there are multiple objects: each frames has multiple masks, one per object
+    return video_segments
 
 
 def main():
@@ -439,6 +441,7 @@ def main():
         action="store_true",
         help="whether to use vos optimized video predictor with all modules compiled",
     )
+    
     args = parser.parse_args()
 
     # if we use per-object PNG files, they could possibly overlap in inputs and outputs

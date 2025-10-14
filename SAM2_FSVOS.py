@@ -7,9 +7,13 @@ from sam2.build_sam import build_sam2_video_predictor
 import os
 from PIL import Image
 import cv2
+from vos_inference import vos_separate_inference_per_object
+import time
 
 class SAM2_FSVOS:
-    def __init__(self, checkpoint, config, session_name, dataset_path, output_dir, verbose, test_query_frame_num):
+    def __init__(self, checkpoint, config, session_name, dataset_path, output_dir, verbose, test_query_frame_num, apply_postprocessing,
+        
+        vos_optimized):
         # self.args = args
         if checkpoint is None:
             print("No checkpoint path provided. Exiting")
@@ -26,11 +30,19 @@ class SAM2_FSVOS:
         self.output_dir = output_dir
         self.verbose = verbose
         self.test_query_frame_num = test_query_frame_num        
+        self.apply_postprocessing = apply_postprocessing
+        self.vos_optimized = vos_optimized
 
         # checkpoint = "./checkpoints/sam2.1_hiera_tiny.pt"
         # model_cfg = "configs/sam2.1/sam2.1_hiera_t.yaml"
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.video_predictor = build_sam2_video_predictor(self.model_cfg, self.checkpoint, device=self.device)
+        self.video_predictor = build_sam2_video_predictor(
+            self.model_cfg, 
+            self.checkpoint, 
+            device=self.device,
+            apply_postprocessing=self.apply_postprocessing,
+            vos_optimized=self.vos_optimized
+        )
         print("Successfully loaded SAM2 model")
                 
 
@@ -68,105 +80,94 @@ class SAM2_FSVOS:
             image = Image.fromarray(image)
         image.save(path)
 
-    def create_dirs(self, base_dir, video_query_img, support_set):
+    def create_dirs(self, base_dir, video_query_set, support_set):
         
         frames_dir = os.path.join(base_dir, "frames")
+        support_masks_dir = os.path.join(base_dir, "support_masks")
         output_dir = os.path.join(base_dir, "output")
         ground_truth_dir = os.path.join(base_dir, "ground_truth")
         
         os.makedirs(frames_dir, exist_ok=True)
+        os.makedirs(support_masks_dir, exist_ok=True)
         os.makedirs(output_dir, exist_ok=True)
-        os.makedirs(ground_truth_dir, exist_ok=True)
+        # os.makedirs(ground_truth_dir, exist_ok=True)
 
-        for i, (img, _) in enumerate(support_set):
-            self.save_image(img, os.path.join(frames_dir, f"{i:04d}.jpg"))
+        for i, (img, mask) in enumerate(support_set):
+            self.save_image(img, os.path.join(frames_dir, f"{i:05d}.jpg"))
+            self.save_image(mask.astype(np.uint8) * 255, os.path.join(support_masks_dir, f"{i:05d}.png"))
 
-        for i, img in enumerate(video_query_img):
-            self.save_image(img, os.path.join(frames_dir, f"{i + len(support_set):04d}.jpg"))
+        for i, (img, mask) in enumerate(video_query_set):
+            self.save_image(img, os.path.join(frames_dir, f"{i + len(support_set):05d}.jpg"))
+            # self.save_image(mask, os.path.join(ground_truth_dir, f"{i + len(support_set):05d}.png"))
 
-        return frames_dir, output_dir, ground_truth_dir
+        return frames_dir, support_masks_dir, output_dir, ground_truth_dir
 
-    def process_video_sam2(self, data, video_predictor, evaluator, support_set, device, data_dir="./output"):
-        video_query_img, video_query_mask, _, _, idx, dir_name, _ = data
-
-        # print(f"Length of query gt: {len(video_query_mask)}")
-        # print(f"Shape of gt mask: {video_query_mask[0].shape}")
-        # print(f"MASK {np.sum(video_query_mask[0])} non-zero elements")
-        # print(f"Starting the segmentation of test {dir_name} with class {idx}")
+    def process_video_sam2(self, video_query_img, video_query_mask, idx, dir_name, video_predictor, evaluator, support_set, data_dir="./output"):
         
         base_dir = f"{data_dir}/{dir_name}"
+        video_query_set = [(img, mask) for img, mask in zip(video_query_img, video_query_mask)]
+        frames_dir, support_masks_dir, prediction_dir, ground_truth_dir = self.create_dirs(base_dir, video_query_set, support_set)
 
-        frames_dir, prediction_dir, ground_truth_dir = self.create_dirs(base_dir, video_query_img, support_set)
-        
-        # Initialize inference state with all frames directory
-        inference_state = video_predictor.init_state(video_path=frames_dir)
+        video_segments = vos_separate_inference_per_object(video_predictor, frames_dir, support_masks_dir, prediction_dir, dir_name)
 
-        print("Loading support frames and their masks into SAM2")
-        
-        obj_id = 1  # Use same object ID for all support frames and query frames
+        video_segmented_masks = []
+        # Assuming single object per video for FSVOS
+        frame_list = sorted(video_segments.keys())
+        for frame_idx in frame_list:
+            obj_id = list(video_segments[frame_idx].keys())[0]
+            video_segmented_masks.append(video_segments[frame_idx][obj_id])
 
-        # Add support frame masks to the predictor
-        for i, (img, mask) in enumerate(support_set):
-            mask_binary = (mask > 0).astype(np.uint8)  # Ensure binary mask
-            mask_tensor = torch.tensor(mask_binary, dtype=torch.bool, device=device)
-            
-            video_predictor.add_new_mask(
-                inference_state=inference_state,
-                frame_idx=i,
-                obj_id=obj_id,
-                mask=mask_tensor
-            )
-            self.save_mask_overlay(img, mask_binary > 0, os.path.join(ground_truth_dir, f"support_{i:04d}.png"))
-            print(f"Added support frame {i}")
+        os.makedirs(os.path.join(prediction_dir, "annotations"), exist_ok=True)
+        os.makedirs(os.path.join(prediction_dir, "overlays"), exist_ok=True)
+        for i, mask in enumerate(video_segmented_masks[5:]):
+            mask = mask.squeeze()
+            self.save_image(mask.astype(np.uint8)*255, os.path.join(prediction_dir, "annotations", f"{i:05d}.png"))
+            self.save_mask_overlay(video_query_img[i], mask, os.path.join(prediction_dir, "overlays", f"{i:05d}.png"))
 
-        print("Processing query video...")
+        print("Updating evaluation metrics...")
+        evaluator.update_evl(idx, video_query_mask, video_segmented_masks[5:])
+        print(f"Evaluation of video {dir_name} completed. \n")
 
-        # Load query frames in sorted order
-        segmented_masks = []
-        # Propagate masks to this frame
-        video_segments = {}
-        for out_frame_idx, out_obj_ids, out_mask_logits in video_predictor.propagate_in_video(inference_state):
-            video_segments[out_frame_idx] = {
-                out_obj_id: (out_mask_logits[j] > 0.0).cpu().numpy()
-                for j, out_obj_id in enumerate(out_obj_ids)
-            }
-
-        for i, query_img in enumerate(video_query_img):
-            print(f"Processing query frame {i}")
-            query_frame = np.array(query_img)
-            query_frame_idx = len(support_set) + i
-            
-            # Extract mask for current query frame
-            if query_frame_idx in video_segments and obj_id in video_segments[query_frame_idx]:
-                mask = video_segments[query_frame_idx][obj_id]
-                segmented_masks.append(mask)
-                print(np.sum(mask), "non-zero elements in the predicted mask")
-                # Save visualization
-                self.save_mask_overlay(query_frame, mask, f"{prediction_dir}/out_{i:04d}.png")
-                # print("overlay of the ground truth")
-                self.save_mask_overlay(query_frame, video_query_mask[i], f"{ground_truth_dir}/gt_{i:04d}.png")
-                print(f"Successfully processed query frame {i}")
-            else:
-                # No mask found, append empty mask
-                empty_mask = np.zeros((query_frame.shape[0], query_frame.shape[1]), dtype=bool)
-                segmented_masks.append(empty_mask)
-                print(f"No mask found for query frame {i}")
-        
-        print(f"Segmentation complete! Generated {len(segmented_masks)} masks")
-        print("Updating evaluation metrics")
-        evaluator.update_evl(idx, video_query_mask, segmented_masks)
-        
-        return segmented_masks
-
-    def save_evaluation_results(self, output_directory, mean_f, mean_j, score_dict):
+    def save_evaluation_results(self, output_directory, mean_f, mean_j, score_dict, elapsed_time):
         results_path = os.path.join(output_directory, "evaluation_results.txt")
         with open(results_path, 'w') as f:
-            f.write(f"Mean F: {mean_f:.4f}\n")
-            f.write(f"Mean J: {mean_j:.4f}\n\n")
+            f.write(f"Mean F: {mean_f:.8f}\n")
+            f.write(f"Mean J: {mean_j:.8f}\n\n")
             f.write("Detailed Scores:\n")
             for class_id, scores in score_dict.items():
-                f.write(f"Class {class_id} - F: {scores['f_score']:.4f}, J: {scores['j_score']:.4f}\n")
+                f.write(f"Class {class_id} - F: {scores['f_score']:.8f}, J: {scores['j_score']:.8f}\n")
+            f.write(f"Execution time: {elapsed_time:.4f} minutes\n")
         print(f"Saved evaluation results to {results_path}")
+
+    def load_test_data(self, n_support_frames):
+        test_dataset = []
+        for i, dir in enumerate(os.listdir(self.dataset_path)):
+            if os.path.isdir(os.path.join(self.dataset_path, dir)):
+                temp = {}
+                support_set = []
+                video_query_img = []
+                video_query_mask = []
+                for j in range(len(os.listdir(os.path.join(self.dataset_path, dir, "frames")))):
+                    if j < n_support_frames:
+                        img = Image.open(os.path.join(self.dataset_path, dir, "frames", f"support_{j:04d}.jpg"))
+                        img = np.array(img)
+                        mask = np.array(Image.open(os.path.join(self.dataset_path, dir, "ground_truth", f"support_{j:04d}.png")))
+                        mask = np.array(mask) * 255
+                        support_set.append((img, mask))
+                    else:
+                        img = Image.open(os.path.join(self.dataset_path, dir, "frames", f"query_{j:04d}.jpg"))
+                        img = np.array(img)
+                        mask = np.array(Image.open(os.path.join(self.dataset_path, dir, "ground_truth", f"query_{j:04d}.png")))
+                        mask = np.array(mask) * 255
+                        video_query_mask.append(mask)
+                        video_query_img.append(img)
+
+                temp["dir_name"] = dir
+                temp["support_set"] = support_set
+                temp["video_query_img"] = video_query_img
+                temp["video_query_mask"] = video_query_mask
+                test_dataset.append(temp)
+        return test_dataset
 
     def test(self, group=1):
         device = self.device
@@ -186,25 +187,29 @@ class SAM2_FSVOS:
 
         test_evaluations = Evaluator(class_list=test_list, verbose=self.verbose)
         support_set = []
+        start_time = time.perf_counter()
         for index, data in enumerate(test_dataset):
-            _,_, new_support_img, new_support_mask, idx, _, begin_new = data
+            video_query_img, video_query_mask, new_support_img, new_support_mask, idx, dir_name, begin_new = data
             if begin_new:
                 support_set = [(img, mask) for img, mask in zip(new_support_img, new_support_mask)]
                 print(f"Support set for class {idx} initialized with {len(support_set)} images.")
 
-            self.process_video_sam2(data, video_predictor, test_evaluations, support_set, device, data_dir=output_directory)
+            self.process_video_sam2(video_query_img, video_query_mask, idx, dir_name, video_predictor, test_evaluations, support_set, data_dir=output_directory)
             
             print(f"F-score list: {test_evaluations.f_score}")
             print(f"J-score list: {test_evaluations.j_score}")
+        elapsed_time = time.perf_counter() - start_time
+        elapsed_minutes = elapsed_time / 60.0
+        print(f"Total processing time: {elapsed_minutes:.4f} minutes")
 
         mean_f = np.mean(test_evaluations.f_score)
-        str_mean_f = 'F: %.4f ' % (mean_f)
+        str_mean_f = 'F: %.8f ' % (mean_f)
         mean_j = np.mean(test_evaluations.j_score)
-        str_mean_j = 'J: %.4f ' % (mean_j)
-        
-        f_list = ['%.4f' % n for n in test_evaluations.f_score]
+        str_mean_j = 'J: %.8f ' % (mean_j)
+
+        f_list = ['%.8f' % n for n in test_evaluations.f_score]
         str_f_list = ' '.join(f_list)
-        j_list = ['%.4f' % n for n in test_evaluations.j_score]
+        j_list = ['%.8f' % n for n in test_evaluations.j_score]
         str_j_list = ' '.join(j_list)
         # Generate dictionary with class id as key and f_score, j_score as values
         score_dict = {
@@ -216,8 +221,57 @@ class SAM2_FSVOS:
         print(str_mean_j, str_j_list + '\n')
 
         # Save evaluation results
-        self.save_evaluation_results(output_directory, mean_f, mean_j, score_dict)
+        self.save_evaluation_results(output_directory, mean_f, mean_j, score_dict, elapsed_minutes)
 
         return mean_f, mean_j, score_dict
+    
+    def reprod_test(self, group=1):
+        device = self.device
+        video_predictor = self.video_predictor
+
+        output_directory = f"{self.output_dir}/{self.session_name}"
+        if self.output_dir is None:
+            output_directory = f"./output/{self.session_name}"
+
+        test_list = [i * 4 + group for i in range(10)]
+        os.makedirs(output_directory, exist_ok=True)
+
+        test_evaluations = Evaluator(class_list=test_list, verbose=self.verbose)
+        test_dataset = self.load_test_data(5)
+        support_set = []
+        start_time = time.perf_counter()
+        for index, data in enumerate(test_dataset):
+            dir_name = data["dir_name"]
+            support_set = data["support_set"]
+            video_query_img = data["video_query_img"]
+            video_query_mask = data["video_query_mask"]
+            class_id = int(data["dir_name"].split('_')[1])
+            print(f"Processing video {dir_name} with class ID {class_id}")
+            self.process_video_sam2(video_query_img, video_query_mask, class_id, dir_name, video_predictor, test_evaluations, support_set, data_dir=output_directory)
+
+        mean_f = np.mean(test_evaluations.f_score)
+        str_mean_f = 'F: %.8f ' % (mean_f)
+        mean_j = np.mean(test_evaluations.j_score)
+        str_mean_j = 'J: %.8f ' % (mean_j)
+        
+        elapsed_time = time.perf_counter() - start_time
+        elapsed_minutes = elapsed_time / 60.0
+        print(f"Total processing time: {elapsed_minutes:.4f} minutes")
+        
+        f_list = ['%.8f' % n for n in test_evaluations.f_score]
+        str_f_list = ' '.join(f_list)
+        j_list = ['%.8f' % n for n in test_evaluations.j_score]
+        str_j_list = ' '.join(j_list)
+        # Generate dictionary with class id as key and f_score, j_score as values
+        score_dict = {
+            class_id: {"f_score": f, "j_score": j}
+            for class_id, f, j in zip(test_list, test_evaluations.f_score, test_evaluations.j_score)
+        }
+
+        print(str_mean_f, str_f_list + '\n')
+        print(str_mean_j, str_j_list + '\n')
+
+        # Save evaluation results
+        self.save_evaluation_results(output_directory, mean_f, mean_j, score_dict, elapsed_minutes)
 
 

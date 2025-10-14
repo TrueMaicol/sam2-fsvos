@@ -13,6 +13,23 @@ def get_arguments():
         parser.add_argument("--group", type=int, default=1)
         parser.add_argument("--test_query_frame_num", type=int, default=None)
         parser.add_argument("--verbose", type=bool, default=False)
+        parser.add_argument(
+            "--apply_postprocessing",
+            action="store_true",
+            help="whether to apply postprocessing (e.g. hole-filling) to the output masks "
+            "(we don't apply such post-processing in the SAM 2 model evaluation)",
+        )
+        parser.add_argument(
+            "--track_object_appearing_later_in_video",
+            action="store_true",
+            help="whether to track objects that appear later in the video (i.e. not on the first frame; "
+            "some VOS datasets like LVOS or YouTube-VOS don't have all objects appearing in the first frame)",
+        )
+        parser.add_argument(
+            "--use_vos_optimized_video_predictor",
+            action="store_true",
+            help="whether to use vos optimized video predictor with all modules compiled",
+        )
 
         return parser.parse_args()
 
@@ -42,11 +59,17 @@ def youtube_fsvos_test(predictor):
 
     return results
 
+def reprod_test(predictor):
+    predictor.reprod_test()
+
+
 def main():
     args = get_arguments()
     
     print('Running parameters:\n')
     print(json.dumps(vars(args), indent=4, separators=(',', ':')))
+
+    
 
     sam2_predictor = SAM2_FSVOS(
         checkpoint=args.checkpoint,
@@ -55,16 +78,19 @@ def main():
         dataset_path=args.dataset_path,
         output_dir=args.output_dir,
         verbose=args.verbose,
-        test_query_frame_num=args.test_query_frame_num
+        test_query_frame_num=args.test_query_frame_num,
+        apply_postprocessing=args.apply_postprocessing,
+        vos_optimized=args.use_vos_optimized_video_predictor,
     )
 
     # mean_f, mean_j, score_dict = sam2_predictor.test(group=2)
     # print(f"Group 2 - Mean F: {mean_f}, Mean J: {mean_j}")
     # print(f"Detailed Scores: {json.dumps(score_dict, indent=4)}")
 
-    results = youtube_fsvos_test(sam2_predictor)
-    print("Final Results from all trials and folds:")
-    print(json.dumps(results, indent=4))
+    # results = youtube_fsvos_test(sam2_predictor)
+    # print("Final Results from all trials and folds:")
+    # print(json.dumps(results, indent=4))
+    reprod_test(sam2_predictor)
 
 if __name__ == '__main__':
     main()

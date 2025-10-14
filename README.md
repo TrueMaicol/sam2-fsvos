@@ -151,5 +151,11 @@ Expected YouTube-VIS 2019 dataset organization:
 ## Template command
 
 ```bash
-python test_SAM2_FSVOS.py --checkpoint sam2.1_hiera_base_plus.pt --config sam2.1/sam2.1_hiera_b+.yaml --session_name full_test_small_1 --test_query_frame_num 5
+python test_SAM2_FSVOS.py \
+  --checkpoint sam2.1_hiera_tiny.pt \
+  --config sam2.1/sam2.1_hiera_t.yaml \
+  --dataset_path /datasets/Youtube-FSVOS/reprod_dataset_1 \
+  --output_dir /output \
+  --track_object_appearing_later_in_video \
+  --session_name new_vos_test_1
 ```
