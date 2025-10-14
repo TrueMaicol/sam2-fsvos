@@ -56,9 +56,11 @@ git clone https://github.com/TrueMaicol/sam2-fsvos.git
 cd sam2-fsvos
 ```
 
-2. **Install dependencies:**
+2. **Install dependencies and build the CUDA extension:**
 ```bash
-pip install -e ".[notebooks]"
+pip uninstall -y SAM-2 && \
+rm -f ./sam2/*.so && \
+SAM2_BUILD_ALLOW_ERRORS=0 pip install -v -e .
 ```
 
 3. **Download SAM 2 checkpoints:**
@@ -87,7 +89,7 @@ cd ..
 Run FSVOS evaluation on a specific group:
 
 ```bash
-python test_SAM2_FSVOS.py --group 1 --dataset_path ./datasets/YoutubeVIS-2019
+python test_SAM2_FSVOS.py --checkpoint sam2.1_hiera_tiny.pt --config sam2.1/sam2.1_hiera_t.yaml --dataset_path /datasets/Youtube-FSVOS/reprod_dataset_fold_1 --output_dir /output --group 1 --session_name reprod_test_fold_1_run_3
 ```
 
 ### Command Line Arguments
@@ -97,19 +99,7 @@ python test_SAM2_FSVOS.py --group 1 --dataset_path ./datasets/YoutubeVIS-2019
 - `--session_name`: Unique identifier for the experiment (auto-generated if not specified)
 - `--test_query_frame_num`: Limit number of query frames per video (optional)
 - `--verbose`: Enable detailed logging during evaluation (to be completed)
-
-### Example Commands
-
-```bash
-# Test on group 1 with verbose output
-python test_SAM2_FSVOS.py --group 1 --verbose --dataset_path ./datasets/YoutubeVIS-2019
-
-# Test with limited query frames
-python test_SAM2_FSVOS.py --group 2 --test_query_frame_num 10 --dataset_path ./datasets/YoutubeVIS-2019
-
-# Custom session name for organized results
-python test_SAM2_FSVOS.py --group 3 --session_name "sam2_experiment_1" --dataset_path ./datasets/YoutubeVIS-2019
-```
+- `--output_dir`: Custom path for output directory
 
 ## Evaluation Metrics
 
@@ -126,10 +116,10 @@ Results are computed per-frame and averaged across all frames in each video, the
 Results are saved in the following directory structure:
 
 ```
-./output/{session_name}/
+{output_dir}/{session_name}/{video_dir_name}
 ├── frames/           # Combined support + query frames for SAM 2 processing
-├── output/           # Generated segmentation masks with overlays and query ground truth
-└── support_overlay/  # Visualization of support frames with ground truth masks
+├── output/           # Generated segmentation masks with overlays
+└── support_overlay/  # Visualization of support frames and query frames with ground truth masks
 ```
 
 ## Dataset Structure
@@ -137,19 +127,18 @@ Results are saved in the following directory structure:
 Expected YouTube-VIS 2019 dataset organization:
 
 ```
-./datasets/YoutubeVIS-2019/
-└── valid/
+{dataset_dir}/Youtube-FSVOS/...
     ├── JPEGImages/
     │   ├── {video_id}/
     │   │   ├── 000000.jpg
     │   │   ├── 000001.jpg
     │   │   └── ...
     │   └── ...
-    └── instances_val_sub.json  # COCO-format annotations
+    └── instances.json  # COCO-format annotations
 ```
 
 ## Template command
 
 ```bash
-python test_SAM2_FSVOS.py --checkpoint sam2.1_hiera_base_plus.pt --config sam2.1/sam2.1_hiera_b+.yaml --session_name full_test_small_1 --test_query_frame_num 5
+python test_SAM2_FSVOS.py --checkpoint sam2.1_hiera_tiny.pt --config sam2.1/sam2.1_hiera_t.yaml --dataset_path /datasets/Youtube-FSVOS/temp --output_dir /output --group 1 --session_name new_test_1
 ```

@@ -20,23 +20,25 @@ LICENSE = "Apache 2.0"
 with open("README.md", "r", encoding="utf-8") as f:
     LONG_DESCRIPTION = f.read()
 
-# Required dependencies
+# Required dependencies (PyTorch installed separately in Dockerfile with CUDA 11.7)
 REQUIRED_PACKAGES = [
-    "torch>=2.5.1",
-    "torchvision>=0.20.1",
-    "numpy>=1.24.4",
+    "numpy>=1.24.4,<2.0.0",
     "tqdm>=4.66.1",
     "hydra-core>=1.3.2",
     "iopath>=0.1.10",
-    "pillow>=9.4.0",
-    "cython>=0.27.3"
+    "pillow>=9.4.0,<10.0.0",
+    "cython>=0.27.3,<3.0.0",
+    "matplotlib>=3.5.0,<4.0.0",
+    "opencv-python-headless>=4.5.0,<5.0.0",
+    "scipy>=1.7.0,<2.0.0",
+    "scikit-image>=0.18.0,<1.0.0",
 ]
 
 EXTRA_PACKAGES = {
     "notebooks": [
-        "matplotlib>=3.9.1",
+        "matplotlib>=3.5.0,<4.0.0",
         "jupyter>=1.0.0",
-        "opencv-python>=4.7.0",
+        "opencv-python>=4.5.0,<5.0.0",
         "eva-decord>=0.6.1",
     ],
     "interactive-demo": [
@@ -55,12 +57,12 @@ EXTRA_PACKAGES = {
         "usort==1.0.2",
         "ufmt==2.0.0b2",
         "fvcore>=0.1.5.post20221221",
-        "pandas>=2.2.2",
-        "scikit-image>=0.24.0",
-        "tensorboard>=2.17.0",
+        "pandas>=2.0.0,<3.0.0",
+        "scikit-image>=0.18.0,<1.0.0",
+        "tensorboard>=2.10.0,<3.0.0",
         "pycocotools>=2.0.8",
         "tensordict>=0.6.0",
-        "opencv-python>=4.7.0",
+        "opencv-python>=4.5.0,<5.0.0",
         "submitit>=1.5.1",
     ],
 }
@@ -70,7 +72,7 @@ EXTRA_PACKAGES = {
 BUILD_CUDA = os.getenv("SAM2_BUILD_CUDA", "1") == "1"
 # By default, we allow SAM 2 installation to proceed even with build errors.
 # You may force stopping on errors with `export SAM2_BUILD_ALLOW_ERRORS=0`.
-BUILD_ALLOW_ERRORS = os.getenv("SAM2_BUILD_ALLOW_ERRORS", "1") == "1"
+BUILD_ALLOW_ERRORS = os.getenv("SAM2_BUILD_ALLOW_ERRORS", "1") == "0"
 
 # Catch and skip errors during extension building and print a warning message
 # (note that this message only shows up under verbose build mode
@@ -99,6 +101,12 @@ def get_extensions():
                 "-D__CUDA_NO_HALF_OPERATORS__",
                 "-D__CUDA_NO_HALF_CONVERSIONS__",
                 "-D__CUDA_NO_HALF2_OPERATORS__",
+                "--expt-relaxed-constexpr",
+                "-gencode=arch=compute_61,code=sm_61",
+                "-gencode=arch=compute_70,code=sm_70",
+                "-gencode=arch=compute_75,code=sm_75",
+                "-gencode=arch=compute_80,code=sm_80",
+                "-gencode=arch=compute_86,code=sm_86",
             ],
         }
         ext_modules = [CUDAExtension("sam2._C", srcs, extra_compile_args=compile_args)]
