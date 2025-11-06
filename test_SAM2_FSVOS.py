@@ -13,23 +13,7 @@ def get_arguments():
         parser.add_argument("--group", type=int, default=1)
         parser.add_argument("--test_query_frame_num", type=int, default=None)
         parser.add_argument("--verbose", type=bool, default=False)
-        parser.add_argument(
-            "--apply_postprocessing",
-            action="store_true",
-            help="whether to apply postprocessing (e.g. hole-filling) to the output masks "
-            "(we don't apply such post-processing in the SAM 2 model evaluation)",
-        )
-        parser.add_argument(
-            "--track_object_appearing_later_in_video",
-            action="store_true",
-            help="whether to track objects that appear later in the video (i.e. not on the first frame; "
-            "some VOS datasets like LVOS or YouTube-VOS don't have all objects appearing in the first frame)",
-        )
-        parser.add_argument(
-            "--use_vos_optimized_video_predictor",
-            action="store_true",
-            help="whether to use vos optimized video predictor with all modules compiled",
-        )
+        
 
         return parser.parse_args()
 
@@ -38,30 +22,22 @@ def youtube_fsvos_test(predictor):
 
     results = {}
 
-    for i in range(5):
-        print(f"Trial {i+1}/5 started!")
-        results[f"trial_{i}"] = {}  # Initialize the trial dictionary
+    for j in range(1, 5):
+        print(f"Started evaluation on fold {j}")
 
-        for j in range(1, 5):
-                print(f"Started evaluation on fold {j}")
+        mean_f, mean_j, score_dict = predictor.test(group=j)
 
-                mean_f, mean_j, score_dict = predictor.test(group=j)
+        print(f"Fold {j}/4 results:")
+        print(f"Group {j} - Mean F: {mean_f}, Mean J: {mean_j}")
+        print(f"Detailed Scores: {json.dumps(score_dict, indent=4)} \n \n \n")
 
-                print(f"Trial {i+1}/5, Fold {j}/4 results:")
-                print(f"Group {j} - Mean F: {mean_f}, Mean J: {mean_j}")
-                print(f"Detailed Scores: {json.dumps(score_dict, indent=4)} \n \n \n")
-
-                results[f"trial_{i}"][f"fold_{j}"] = {
-                    "mean_f": mean_f,
-                    "mean_j": mean_j,
-                    "detailed_scores": score_dict
-                }
+        results[f"fold_{j}"] = {
+            "mean_f": mean_f,
+            "mean_j": mean_j,
+            "detailed_scores": score_dict
+        }
 
     return results
-
-def reprod_test(predictor):
-    predictor.reprod_test()
-
 
 def main():
     args = get_arguments()
@@ -79,8 +55,7 @@ def main():
         output_dir=args.output_dir,
         verbose=args.verbose,
         test_query_frame_num=args.test_query_frame_num,
-        apply_postprocessing=args.apply_postprocessing,
-        vos_optimized=args.use_vos_optimized_video_predictor,
+        group=args.group
     )
 
     # mean_f, mean_j, score_dict = sam2_predictor.test(group=2)
@@ -90,7 +65,8 @@ def main():
     # results = youtube_fsvos_test(sam2_predictor)
     # print("Final Results from all trials and folds:")
     # print(json.dumps(results, indent=4))
-    reprod_test(sam2_predictor)
+    sam2_predictor.reprod_test(group=args.group)
+    
 
 if __name__ == '__main__':
     main()
