@@ -65,8 +65,8 @@ def main():
     # results = youtube_fsvos_test(sam2_predictor)
     # print("Final Results from all trials and folds:")
     # print(json.dumps(results, indent=4))
-    sam2_predictor.reprod_test(group=args.group)
-    
+    # sam2_predictor.reprod_test(group=args.group)
+    sam2_predictor.test(group=args.group)
 
 if __name__ == '__main__':
     main()

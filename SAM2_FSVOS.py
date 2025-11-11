@@ -103,7 +103,7 @@ class SAM2_FSVOS:
     def process_video_sam2(self, video_predictor, support_set, video_query_set, class_id, dir_name, evaluator, device, data_dir="./output"):
 
         print(f"Processing video: {dir_name}")
-        base_dir = f"{data_dir}/{dir_name}"
+        base_dir = f"{data_dir}/{dir_name}_class_{class_id}"
 
         frames_dir, prediction_dir, ground_truth_dir = self.create_dirs(base_dir, video_query_set, support_set)
         
@@ -156,7 +156,7 @@ class SAM2_FSVOS:
         # Add support frame masks to the predictor
         for i, (img, mask) in enumerate(support_set):
             mask_tensor = torch.tensor(mask > 0, dtype=torch.bool, device=device)
-            
+            print(f"Support frame {i}: mask tensor shape {mask_tensor.shape}, dtype {mask_tensor.dtype}, device {mask_tensor.device}")
             video_predictor.add_new_mask(
                 inference_state=inference_state,
                 frame_idx=i,
@@ -229,24 +229,52 @@ class SAM2_FSVOS:
                 video_query_set = []
                 for j in range(len(os.listdir(os.path.join(self.dataset_path, dir, "frames")))):
                     if j < n_support_frames:
-                        img = Image.open(os.path.join(self.dataset_path, dir, "frames", f"support_{j:04d}.jpg"))
+                        img = Image.open(os.path.join(self.dataset_path, dir, "frames", f"{j:05d}.jpg"))
                         img = np.array(img)
-                        mask = np.array(Image.open(os.path.join(self.dataset_path, dir, "ground_truth", f"support_{j:04d}.png")))
+                        mask = np.array(Image.open(os.path.join(self.dataset_path, dir, "support", f"{j:05d}.png")).convert("L"))
                         mask = np.array(mask)
                         support_set.append((img, mask))
                     else:
-                        img = Image.open(os.path.join(self.dataset_path, dir, "frames", f"query_{j:04d}.jpg"))
+                        img = Image.open(os.path.join(self.dataset_path, dir, "frames", f"{j:05d}.jpg"))
                         img = np.array(img)
-                        mask = np.array(Image.open(os.path.join(self.dataset_path, dir, "ground_truth", f"query_{j:04d}.png")))
+                        mask = np.array(Image.open(os.path.join(self.dataset_path, dir, "ground_truth", f"{j:05d}.png")).convert("L"))
                         mask = np.array(mask)
                         video_query_set.append((img, mask))
-
-                temp["dir_name"] = dir
+                dir_name_split = dir.split("_")
+                temp["dir_name"] = dir_name_split[0]
+                temp["class_id"] = int(dir_name_split[1])
                 temp["support_set"] = support_set
                 temp["video_query_set"] = video_query_set
                 test_dataset.append(temp)
         return test_dataset
 
+    def load_video_data(self, video_dir_path, n_support_frames=5):
+        data = {}
+        if os.path.isdir(video_dir_path):
+            support_set = []
+            video_query_set = []
+            for j in range(len(os.listdir(os.path.join(video_dir_path, "frames")))):
+                if j < n_support_frames:
+                    img = Image.open(os.path.join(video_dir_path, "frames", f"{j:05d}.jpg"))
+                    img = np.array(img)
+                    mask = np.array(Image.open(os.path.join(video_dir_path, "support", f"{j:05d}.png")).convert("L"))
+                    mask = np.array(mask)
+                    support_set.append((img, mask))
+                else:
+                    img = Image.open(os.path.join(video_dir_path, "frames", f"{j:05d}.jpg"))
+                    img = np.array(img)
+                    mask = np.array(Image.open(os.path.join(video_dir_path, "ground_truth", f"{j:05d}.png")).convert("L"))
+                    mask = np.array(mask)
+                    video_query_set.append((img, mask))
+            dir_name_split = os.path.basename(video_dir_path).split("_")
+            data["dir_name"] = dir_name_split[0]
+            data["class_id"] = int(dir_name_split[1])
+            data["support_set"] = support_set
+            data["video_query_set"] = video_query_set
+        return data
+
+    def get_video_names(self):
+        return os.listdir(self.dataset_path)
 
     def test(self, group=1):
         device = self.device
@@ -263,11 +291,11 @@ class SAM2_FSVOS:
         test_list = test_dataset.get_class_list()
 
         print('test_group:',group, '  test_num:', len(test_dataset), '  class_list:', test_list, ' dataset_path:', self.dataset_path)
-
         test_evaluations = Evaluator(class_list=test_list, verbose=self.verbose)
         support_set = []
         start_time = time.perf_counter()
         for index, data in enumerate(test_dataset):
+            
             video_query_img, video_query_mask, new_support_img, new_support_mask, class_id, dir_name, begin_new = data
             if begin_new:
                 support_set = [(img, mask) for img, mask in zip(new_support_img, new_support_mask)]
@@ -317,7 +345,7 @@ class SAM2_FSVOS:
     def reprod_test(self, group=1):
         device = self.device
         video_predictor = self.video_predictor
-        n_support_frames = 5
+        n_support_frames = 1
 
         output_directory = f"{self.output_dir}/{self.session_name}"
         if self.output_dir is None:
@@ -328,18 +356,21 @@ class SAM2_FSVOS:
         os.makedirs(output_directory, exist_ok=True)
 
         test_evaluations = Evaluator(class_list=test_list, verbose=self.verbose)
-        test_dataset = self.load_test_data(n_support_frames=n_support_frames)
+        # test_dataset = self.load_test_data(n_support_frames=n_support_frames)
+        test_video_names = self.get_video_names()
 
         # self.reset_reproducibility(seed=42, verbose=True)
         start_time = time.perf_counter()
 
         support_set = []
-        for index, data in enumerate(test_dataset):
+        for index, vid in enumerate(test_video_names):
+            print(f"Processing video {index + 1}/{len(test_video_names)}: {vid}")
+            data = self.load_video_data(os.path.join(self.dataset_path, vid), n_support_frames=n_support_frames)
             support_set = data["support_set"]
             video_query_set = data["video_query_set"]
             dir_name = data["dir_name"]
-            class_id = int(dir_name.split("_")[1])
-
+            class_id = data["class_id"]
+            
             self.process_video_sam2(
                 video_predictor,
                 support_set,
