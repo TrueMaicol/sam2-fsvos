@@ -10,10 +10,15 @@ def get_arguments():
         parser.add_argument("--session_name", type=str, default=str(random.randbytes(4).hex()))
         parser.add_argument("--dataset_path", type=str, default=None)
         parser.add_argument("--output_dir", type=str, default="./output")
-        parser.add_argument("--group", type=int, default=1)
+        parser.add_argument("--fold", type=int, default=1)
         parser.add_argument("--test_query_frame_num", type=int, default=None)
         parser.add_argument("--verbose", type=bool, default=False)
-        
+        parser.add_argument("--benchmark", type=str, choices=["minivspw", "youtube-fsvos"], default="youtube-fsvos")
+        parser.add_argument('--seed', type=int, default=0)
+        parser.add_argument('--run_number', type=int, default=1)
+        parser.add_argument('--random_state_path', type=str, default=None)
+        parser.add_argument("--nshot", type=int, default=5)
+        parser.add_argument("--data_list_path", type=str, default=None)
 
         return parser.parse_args()
 
@@ -25,7 +30,7 @@ def youtube_fsvos_test(predictor):
     for j in range(1, 5):
         print(f"Started evaluation on fold {j}")
 
-        mean_f, mean_j, score_dict = predictor.test(group=j)
+        mean_f, mean_j, score_dict = predictor.test(fold=j)
 
         print(f"Fold {j}/4 results:")
         print(f"Group {j} - Mean F: {mean_f}, Mean J: {mean_j}")
@@ -45,8 +50,6 @@ def main():
     print('Running parameters:\n')
     print(json.dumps(vars(args), indent=4, separators=(',', ':')))
 
-    
-
     sam2_predictor = SAM2_FSVOS(
         checkpoint=args.checkpoint,
         config=args.config,
@@ -55,7 +58,8 @@ def main():
         output_dir=args.output_dir,
         verbose=args.verbose,
         test_query_frame_num=args.test_query_frame_num,
-        group=args.group
+        fold=args.fold,
+        args=args
     )
 
     # mean_f, mean_j, score_dict = sam2_predictor.test(group=2)
@@ -65,8 +69,8 @@ def main():
     # results = youtube_fsvos_test(sam2_predictor)
     # print("Final Results from all trials and folds:")
     # print(json.dumps(results, indent=4))
-    sam2_predictor.reprod_test(group=args.group)
-    
+    sam2_predictor.reprod_test(fold=args.fold)
+    # sam2_predictor.test(fold=args.fold, seed=args.seed, nshot=args.nshot)
 
 if __name__ == '__main__':
     main()

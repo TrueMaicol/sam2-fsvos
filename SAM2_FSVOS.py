@@ -8,10 +8,25 @@ import random
 from utils.Evaluator import Evaluator
 import time
 from datetime import datetime
-from YoutubeVOS import YTVOSDataset
+import json
+from datasets.MiniVSPW.nminivspw_dataset import NMiniVSPWEpisodicData
+from RandomStateManager import RandomStateManager
+from datasets.YoutubeFSVOS.YoutubeFSVOS import YTVOSDataset
+from datasets.YoutubeFSVOS.transform import TestTransform
+
+def fix_randseed(seed):
+    r""" Set random seeds for reproducibility """
+    if seed is None:
+        seed = int(random.random() * 1e5)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
 
 class SAM2_FSVOS:
-    def __init__(self, checkpoint, config, session_name, dataset_path, output_dir, verbose, test_query_frame_num, group=1):
+    def __init__(self, checkpoint, config, session_name, dataset_path, output_dir, verbose, test_query_frame_num, fold=1, args=None):
         # self.args = args
         if checkpoint is None:
             print("No checkpoint path provided. Exiting")
@@ -28,7 +43,12 @@ class SAM2_FSVOS:
         self.output_dir = output_dir
         self.verbose = verbose
         self.test_query_frame_num = test_query_frame_num        
-        self.group = group
+        self.fold = fold
+        self.benchmark = args.benchmark
+        self.run_number = args.run_number
+        self.random_state_path = args.random_state_path
+        self.data_list_path = args.data_list_path
+
         # checkpoint = "./checkpoints/sam2.1_hiera_tiny.pt"
         # model_cfg = "configs/sam2.1/sam2.1_hiera_t.yaml"
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -51,7 +71,14 @@ class SAM2_FSVOS:
         # Ensure image is numpy array
         if isinstance(image, Image.Image):
             image = np.array(image)
-    
+
+        if image.dtype in (np.float32, np.float64):
+            # Assume values are in [0, 1] range if max <= 1, otherwise [0, 255]
+            if image.max() <= 1.0:
+                image = (image * 255).astype(np.uint8)
+            else:
+                image = image.astype(np.uint8)
+
         # print(f"Image shape: {image.shape[:2]}, Mask shape: {mask.shape[:2]}")
         
         # Ensure mask is 2D boolean array
@@ -76,7 +103,14 @@ class SAM2_FSVOS:
 
     def save_image(self, image, path):
         """Save a numpy array or PIL image to the specified path."""
+        image = image.squeeze()
         if isinstance(image, np.ndarray):
+            if image.dtype in (np.float32, np.float64):
+                # Assume values are in [0, 1] range if max <= 1, otherwise [0, 255]
+                if image.max() <= 1.0:
+                    image = (image * 255).astype(np.uint8)
+                else:
+                    image = image.astype(np.uint8)
             image = Image.fromarray(image)
         image.save(path)
 
@@ -156,7 +190,9 @@ class SAM2_FSVOS:
         # Add support frame masks to the predictor
         for i, (img, mask) in enumerate(support_set):
             mask_tensor = torch.tensor(mask > 0, dtype=torch.bool, device=device)
-            
+            mask_tensor = mask_tensor.squeeze()
+
+            # print(f"Support frame {i}: mask tensor shape {mask_tensor.shape}, dtype {mask_tensor.dtype}, device {mask_tensor.device}")
             video_predictor.add_new_mask(
                 inference_state=inference_state,
                 frame_idx=i,
@@ -164,8 +200,8 @@ class SAM2_FSVOS:
                 mask=mask_tensor
             )
             self.save_mask_overlay(img, mask_tensor.cpu().numpy(), os.path.join(ground_truth_dir, f"support_{i:04d}.png"))
-            print(f"Added support frame {i} (corresponds to frame file {i:05d}.jpg)")
-            print(f"  Mask has {torch.sum(mask_tensor).item()} non-zero pixels")
+            # print(f"Added support frame {i} (corresponds to frame file {i:05d}.jpg)")
+            # print(f"  Mask has {torch.sum(mask_tensor).item()} non-zero pixels")
 
         print("Processing query video...")
 
@@ -193,11 +229,13 @@ class SAM2_FSVOS:
                 # Save visualization
                 self.save_mask_overlay(query_frame, mask, f"{prediction_dir}/out_{i:04d}.png")
                 self.save_mask_overlay(query_frame, query_mask, f"{ground_truth_dir}/query_{i:04d}.png")
+                self.save_image(mask.astype(np.uint8)*255, f"{prediction_dir}/out_mask_{i:04d}.png")
                 # print(f"  Successfully processed query frame {i}")
             else:
                 # No mask found, append empty mask
                 empty_mask = np.zeros((query_frame.shape[0], query_frame.shape[1]), dtype=bool)
                 segmented_masks.append(empty_mask)
+                self.save_image(empty_mask.astype(np.uint8)*255, f"{prediction_dir}/out_mask_{i:04d}.png")
                 print(f"  WARNING: No mask found for query frame {i} (frame_idx {query_frame_idx})")
                
         print(f"Segmentation complete! Generated {len(segmented_masks)} masks")
@@ -229,50 +267,110 @@ class SAM2_FSVOS:
                 video_query_set = []
                 for j in range(len(os.listdir(os.path.join(self.dataset_path, dir, "frames")))):
                     if j < n_support_frames:
-                        img = Image.open(os.path.join(self.dataset_path, dir, "frames", f"support_{j:04d}.jpg"))
+                        img = Image.open(os.path.join(self.dataset_path, dir, "frames", f"{j:05d}.jpg"))
                         img = np.array(img)
-                        mask = np.array(Image.open(os.path.join(self.dataset_path, dir, "ground_truth", f"support_{j:04d}.png")))
+                        mask = np.array(Image.open(os.path.join(self.dataset_path, dir, "support", f"{j:05d}.png")).convert("L"))
                         mask = np.array(mask)
                         support_set.append((img, mask))
                     else:
-                        img = Image.open(os.path.join(self.dataset_path, dir, "frames", f"query_{j:04d}.jpg"))
+                        img = Image.open(os.path.join(self.dataset_path, dir, "frames", f"{j:05d}.jpg"))
                         img = np.array(img)
-                        mask = np.array(Image.open(os.path.join(self.dataset_path, dir, "ground_truth", f"query_{j:04d}.png")))
+                        mask = np.array(Image.open(os.path.join(self.dataset_path, dir, "ground_truth", f"{j:05d}.png")).convert("L"))
                         mask = np.array(mask)
                         video_query_set.append((img, mask))
-
-                temp["dir_name"] = dir
+                dir_name_split = dir.split("_")
+                temp["dir_name"] = dir_name_split[0]
+                temp["class_id"] = int(dir_name_split[1])
                 temp["support_set"] = support_set
                 temp["video_query_set"] = video_query_set
                 test_dataset.append(temp)
         return test_dataset
 
+    def load_video_data(self, video_dir_path, n_support_frames=5):
+        data = {}
+        if os.path.isdir(video_dir_path):
+            support_set = []
+            video_query_set = []
+            for j in range(len(os.listdir(os.path.join(video_dir_path, "frames")))):
+                if j < n_support_frames:
+                    img = Image.open(os.path.join(video_dir_path, "frames", f"{j:05d}.jpg"))
+                    img = np.array(img)
+                    mask = np.array(Image.open(os.path.join(video_dir_path, "support", f"{j:05d}.png")).convert("L"))
+                    # mask = np.array(Image.open(os.path.join(video_dir_path, "support", f"{j:01d}_pred_mask.png")).convert("L")) # FOR MATCHER + SAM2
+                    mask = np.array(mask)
+                    support_set.append((img, mask))
+                else:
+                    img = Image.open(os.path.join(video_dir_path, "frames", f"{j:05d}.jpg"))
+                    img = np.array(img)
+                    mask = np.array(Image.open(os.path.join(video_dir_path, "ground_truth", f"{j:05d}.png")).convert("L"))
+                    mask = np.array(mask)
+                    video_query_set.append((img, mask))
+            dir_name_split = os.path.basename(video_dir_path).split("_")
+            data["dir_name"] = os.path.basename(video_dir_path)
+            if self.benchmark == "minivspw":
+                data["class_id"] = int(dir_name_split[-2])
+            else:
+                data["class_id"] = int(dir_name_split[1])
+            data["support_set"] = support_set
+            data["video_query_set"] = video_query_set
+        return data
 
-    def test(self, group=1):
+    def get_video_names(self):
+        return os.listdir(self.dataset_path)
+
+    def test(self, fold=1, seed=42, nshot=5):
         device = self.device
         video_predictor = self.video_predictor
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_directory = f"{self.output_dir}/{self.session_name}/fold_{group}_{timestamp}"
+        output_directory = f"{self.output_dir}/{self.session_name}/fold_{fold}_{timestamp}"
         if self.output_dir is None:
-            output_directory = f"./output/{self.session_name}/fold_{group}_{timestamp}"
+            output_directory = f"./output/{self.session_name}/fold_{fold}_{timestamp}"
         
         os.makedirs(output_directory, exist_ok=True)
 
-        test_dataset = YTVOSDataset(train=False, set_index=group, data_dir=self.dataset_path, test_query_frame_num=self.test_query_frame_num)
-        test_list = test_dataset.get_class_list()
+        if self.benchmark == "youtube-fsvos":
+            test_dataset = YTVOSDataset(train=False, set_index=fold, data_dir=self.dataset_path, test_query_frame_num=self.test_query_frame_num, seed=seed, support_frame=nshot, transforms=TestTransform(size=518))
+            random.seed(seed)
+            fix_randseed(seed)
+        elif self.benchmark == "minivspw":
+            test_dataset = NMiniVSPWEpisodicData(
+                fold=fold-1,
+                sprtset_as_frames=False,
+                split_type='test',
+                shot=nshot,
+                data_root=self.dataset_path,
+                data_list_path=self.data_list_path,
+                transform=TestTransform(size=518),
+            )
+            state_manager = RandomStateManager(save_dir=self.random_state_path)
 
-        print('test_group:',group, '  test_num:', len(test_dataset), '  class_list:', test_list, ' dataset_path:', self.dataset_path)
+            if self.run_number == 1:
+                state_manager.initialize_seed(seed=seed)
+            else:
+                state_manager.load_state(fold=fold, run_number=self.run_number-1)
+        test_list = test_dataset.get_class_ids() 
 
+        print('test_fold:',fold, '  test_num:', len(test_dataset), '  class_list:', test_list, ' dataset_path:', self.dataset_path)
         test_evaluations = Evaluator(class_list=test_list, verbose=self.verbose)
         support_set = []
         start_time = time.perf_counter()
         for index, data in enumerate(test_dataset):
-            video_query_img, video_query_mask, new_support_img, new_support_mask, class_id, dir_name, begin_new = data
-            if begin_new:
-                support_set = [(img, mask) for img, mask in zip(new_support_img, new_support_mask)]
-                print(f"Support set for class {class_id} initialized with {len(support_set)} images.")
+            
+            if self.benchmark == "youtube-fsvos":
+                video_query_img, video_query_mask, new_support_img, new_support_mask, class_id, dir_name, begin_new = data
 
+                if begin_new:
+                    support_set = [(img, mask) for img, mask in zip(new_support_img, new_support_mask)]
+                    class_name = test_dataset.idx_to_classname[class_id]
+                    
+            elif self.benchmark == "minivspw":
+                video_query_img, video_query_mask, new_support_img, new_support_mask, class_id, dir_name, _ = data
+                support_set = [(img, mask) for img, mask in zip(new_support_img, new_support_mask)]
+                class_id = class_id[0]
+                class_name = test_dataset.idx_to_classname[class_id]
+
+            dir_name = f"{dir_name}_{class_id}_{index}"
             video_query_set = [(img, mask) for img, mask in zip(video_query_img, video_query_mask)]
             self.process_video_sam2(
                 video_predictor,
@@ -314,32 +412,50 @@ class SAM2_FSVOS:
         return mean_f, mean_j, score_dict
     
 
-    def reprod_test(self, group=1):
+    def get_test_list(self, fold=1):
+        if self.benchmark is None or self.benchmark == "youtube-fsvos":
+            return [i * 4 + fold for i in range(10)]
+        elif self.benchmark == "minivspw":
+            # load the test classes from the minivspw lists
+            if self.data_list_path is not None:
+                class_list_path = f"{os.path.dirname(self.data_list_path)}/class_test_{fold-1}.json"
+            else:
+                class_list_path = "./datasets/MiniVSPW/lists/class_test_{}.json".format(fold-1)
+            with open(class_list_path, "r") as f:
+                class_list = json.load(f)
+            class_list = [int(k) for k in class_list.keys()]
+            return class_list
+
+    def reprod_test(self, fold=1):
         device = self.device
         video_predictor = self.video_predictor
-        n_support_frames = 5
+        n_support_frames = 1
 
         output_directory = f"{self.output_dir}/{self.session_name}"
         if self.output_dir is None:
             output_directory = f"./output/{self.session_name}"
 
-        test_list = [i * 4 + group for i in range(10)]
+
+        test_list = self.get_test_list(fold)
         print(f"Testing on classes: {test_list}")
         os.makedirs(output_directory, exist_ok=True)
 
         test_evaluations = Evaluator(class_list=test_list, verbose=self.verbose)
-        test_dataset = self.load_test_data(n_support_frames=n_support_frames)
-
+        # test_dataset = self.load_test_data(n_support_frames=n_support_frames)
+        test_video_names = self.get_video_names()
+        print(f"Dataset length: {len(test_video_names)}")
         # self.reset_reproducibility(seed=42, verbose=True)
         start_time = time.perf_counter()
 
         support_set = []
-        for index, data in enumerate(test_dataset):
+        for index, vid in enumerate(test_video_names):
+            print(f"Processing video {index + 1}/{len(test_video_names)}: {vid}")
+            data = self.load_video_data(os.path.join(self.dataset_path, vid), n_support_frames=n_support_frames)
             support_set = data["support_set"]
             video_query_set = data["video_query_set"]
             dir_name = data["dir_name"]
-            class_id = int(dir_name.split("_")[1])
-
+            class_id = data["class_id"]
+            
             self.process_video_sam2(
                 video_predictor,
                 support_set,
@@ -349,6 +465,17 @@ class SAM2_FSVOS:
                 test_evaluations, 
                 device,
                 data_dir=output_directory)
+
+            f_list = ['%.8f' % n for n in test_evaluations.f_score]
+            str_f_list = ' '.join(f_list)
+            j_list = ['%.8f' % n for n in test_evaluations.j_score]
+            str_j_list = ' '.join(j_list)
+            score_dict = {
+                class_id: {"f_score": f, "j_score": j}
+                for class_id, f, j in zip(test_list, test_evaluations.f_score, test_evaluations.j_score)
+            }
+            print(f"Intermediate Results after video {vid}:")
+            print(score_dict)
 
         mean_f = np.mean(test_evaluations.f_score)
         str_mean_f = 'F: %.8f ' % (mean_f)
@@ -374,4 +501,6 @@ class SAM2_FSVOS:
 
         # Save evaluation results
         self.save_evaluation_results(output_directory, mean_f, mean_j, score_dict, elapsed_minutes)
+
+        return mean_f, mean_j, score_dict
 
